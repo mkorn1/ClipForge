@@ -9,6 +9,7 @@
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../build"
   },
+  "plugins": {},
   "app": {
     "windows": [
       {
@@ -18,6 +19,7 @@
       }
     ],
     "security": {
+      "dangerousDisableAssetCspModification": false,
       "csp": null
     }
   },

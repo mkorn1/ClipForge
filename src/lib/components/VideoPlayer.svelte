@@ -18,16 +18,43 @@
   let currentTime = $state(0);
   let duration = $state(0);
   let isDragging = $state(false);
+  let errorMessage = $state<string | null>(null);
+  let isLoading = $state(true);
+
+  // Reset loading state when video URL changes
+  $effect(() => {
+    videoUrl;
+    isLoading = true;
+    errorMessage = null;
+  });
 
   onMount(() => {
     if (videoElement) {
+      videoElement.addEventListener("loadstart", () => {
+        isLoading = true;
+      });
+
       videoElement.addEventListener("loadedmetadata", () => {
         duration = videoElement!.duration;
+        isLoading = false;
       });
 
       videoElement.addEventListener("timeupdate", () => {
         if (!isDragging) {
           currentTime = videoElement!.currentTime;
+        }
+      });
+
+      videoElement.addEventListener("error", (e) => {
+        console.error("Video error:", e);
+        console.error("Video URL:", videoUrl);
+        console.error("Video element error:", videoElement?.error);
+        console.error("Network state:", videoElement?.networkState);
+        console.error("Ready state:", videoElement?.readyState);
+        
+        const error = videoElement?.error;
+        if (error) {
+          errorMessage = `Error loading video: ${error.message || 'Unknown error'}`;
         }
       });
     }
@@ -90,7 +117,12 @@
         onclick={togglePlay}
         aria-label="Video player"
       ></video>
-      {#if !metadata}
+      {#if errorMessage}
+        <div class="error-message">
+          <p>{errorMessage}</p>
+          <p class="error-details">Check the console for more details</p>
+        </div>
+      {:else if isLoading}
         <div class="loading">Loading video...</div>
       {/if}
     </div>
@@ -168,6 +200,23 @@
     position: absolute;
     color: white;
     font-size: 1.2rem;
+  }
+
+  .error-message {
+    position: absolute;
+    color: white;
+    text-align: center;
+    padding: 1rem;
+  }
+
+  .error-message p {
+    margin: 0.5rem 0;
+    font-size: 1rem;
+  }
+
+  .error-details {
+    font-size: 0.8rem !important;
+    opacity: 0.8;
   }
 
   .controls {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
-  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { readFile } from "@tauri-apps/plugin-fs";
 
   interface VideoFile {
     path: string;
@@ -17,6 +17,18 @@
 
   let isDragging = $state(false);
 
+  function getMimeType(filename: string): string {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      "mp4": "video/mp4",
+      "mov": "video/quicktime",
+      "avi": "video/x-msvideo",
+      "mkv": "video/x-matroska",
+      "webm": "video/webm",
+    };
+    return mimeTypes[ext || ""] || "video/mp4";
+  }
+
   async function handleImport() {
     try {
       const selected = await open({
@@ -31,14 +43,36 @@
 
       if (selected && onImport) {
         const files = Array.isArray(selected) ? selected : [selected];
-        const videoFiles: VideoFile[] = files.map((path) => {
-          const name = path.split(/[/\\]/).pop() || "Unknown";
-          return {
-            path,
-            name,
-            url: convertFileSrc(path),
-          };
-        });
+        const videoFiles: VideoFile[] = await Promise.all(
+          files.map(async (path) => {
+            const name = path.split(/[/\\]/).pop() || "Unknown";
+            
+            try {
+              // Read the file and create a blob URL
+              const fileData = await readFile(path);
+              const mimeType = getMimeType(name);
+              const blob = new Blob([fileData], { type: mimeType });
+              const url = URL.createObjectURL(blob);
+              
+              console.log("Importing file:", name);
+              console.log("Path:", path);
+              console.log("File size:", fileData.length);
+              console.log("MIME type:", mimeType);
+              console.log("Created blob URL:", url);
+              console.log("Blob size:", blob.size);
+              
+              return {
+                path,
+                name,
+                url,
+                size: fileData.length,
+              };
+            } catch (error) {
+              console.error(`Error reading file ${name}:`, error);
+              throw error;
+            }
+          })
+        );
         onImport(videoFiles);
       }
     } catch (error) {
@@ -61,23 +95,30 @@
 
     const files = e.dataTransfer?.files;
     if (files && onImport) {
-      const videoFiles: VideoFile[] = Array.from(files)
+      const filePromises = Array.from(files)
         .filter((file) => {
           const ext = file.name.split(".").pop()?.toLowerCase();
           return ["mp4", "mov", "avi", "mkv", "webm"].includes(ext || "");
         })
-        .map((file) => {
+        .map(async (file) => {
+          // For Tauri, we need to read the file content
+          const arrayBuffer = await file.arrayBuffer();
+          const blob = new Blob([arrayBuffer], { type: file.type || 'video/*' });
+          const url = URL.createObjectURL(blob);
+          
           return {
             path: (file as any).path || file.name,
             name: file.name,
-            url: URL.createObjectURL(file),
+            url,
             size: file.size,
           };
         });
       
-      if (videoFiles.length > 0) {
-        onImport(videoFiles);
-      }
+      Promise.all(filePromises).then((videoFiles) => {
+        if (videoFiles.length > 0) {
+          onImport(videoFiles);
+        }
+      });
     }
   }
 </script>

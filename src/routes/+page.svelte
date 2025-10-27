@@ -14,7 +14,10 @@
   let selectedVideo = $state<VideoFile | null>(null);
 
   function handleImport(importedVideos: VideoFile[]) {
-    videos = [...videos, ...importedVideos];
+    // Filter out duplicates based on path
+    const existingPaths = new Set(videos.map(v => v.path));
+    const newVideos = importedVideos.filter(v => !existingPaths.has(v.path));
+    videos = [...videos, ...newVideos];
   }
 
   function handleVideoSelect(video: VideoFile) {
