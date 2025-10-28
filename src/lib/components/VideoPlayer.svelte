@@ -13,13 +13,22 @@
       duration: number;
       fileSize: string;
     } | null;
+    currentTime?: number;
+    onTimeUpdate?: (time: number) => void;
   }
 
-  let { videoUrl = "", videoPath, videoName = "export", metadata = null }: Props = $props();
+  let { videoUrl = "", videoPath, videoName = "export", metadata = null, currentTime = 0, onTimeUpdate }: Props = $props();
+
+  // Update video time when external currentTime changes
+  $effect(() => {
+    if (videoElement && currentTime !== undefined && Math.abs(videoElement.currentTime - currentTime) > 0.1) {
+      videoElement.currentTime = currentTime;
+    }
+  });
 
   let videoElement = $state<HTMLVideoElement | null>(null);
   let isPlaying = $state(false);
-  let currentTime = $state(0);
+  let internalCurrentTime = $state(0);
   let duration = $state(0);
   let isDragging = $state(false);
   let errorMessage = $state<string | null>(null);
@@ -47,7 +56,10 @@
 
       videoElement.addEventListener("timeupdate", () => {
         if (!isDragging) {
-          currentTime = videoElement!.currentTime;
+          internalCurrentTime = videoElement!.currentTime;
+          if (onTimeUpdate) {
+            onTimeUpdate(internalCurrentTime);
+          }
         }
       });
 
@@ -90,7 +102,7 @@
       const percent = (e.clientX - rect.left) / rect.width;
       const newTime = percent * duration;
       videoElement.currentTime = newTime;
-      currentTime = newTime;
+      internalCurrentTime = newTime;
     }
   }
 
@@ -182,7 +194,7 @@
           <p class="error-details">Check the console for more details</p>
         </div>
       {:else if isLoading}
-        <div class="loading">Loading video...</div>
+        <div class="loading"></div>
       {/if}
     </div>
 
@@ -194,13 +206,13 @@
       <div class="seek-container">
         <button type="button" class="seek-bar-button" aria-label="Seek video" onmousedown={handleMouseDown} onmouseup={handleMouseUp} onclick={handleSeek}>
           <div class="seek-bar">
-            <div class="seek-progress" style="width: {duration ? (currentTime / duration) * 100 : 0}%"></div>
+            <div class="seek-progress" style="width: {duration ? (internalCurrentTime / duration) * 100 : 0}%"></div>
           </div>
         </button>
       </div>
 
       <div class="time-display">
-        <span>{formatTime(currentTime)}</span>
+        <span>{formatTime(internalCurrentTime)}</span>
         <span>/</span>
         <span>{formatTime(duration)}</span>
       </div>

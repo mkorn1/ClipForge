@@ -1,7 +1,32 @@
 <script lang="ts">
-  import ImportButton from "$lib/components/ImportButton.svelte";
-  import MediaLibrary from "$lib/components/MediaLibrary.svelte";
   import VideoPlayer from "$lib/components/VideoPlayer.svelte";
+  import Timeline from "$lib/components/Timeline.svelte";
+  import ImportButton from "$lib/components/ImportButton.svelte";
+
+  interface TimelineClip {
+    id: string;
+    videoUrl: string;
+    videoPath: string;
+    name: string;
+    startTime: number;
+    endTime: number;
+  }
+
+  let timelineClips = $state<TimelineClip[]>([]);
+  let selectedClip = $state<TimelineClip | null>(null);
+  let currentTime = $state(0);
+
+  function getMimeType(filename: string): string {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      "mp4": "video/mp4",
+      "mov": "video/quicktime",
+      "avi": "video/x-msvideo",
+      "mkv": "video/x-matroska",
+      "webm": "video/webm",
+    };
+    return mimeTypes[ext || ""] || "video/mp4";
+  }
 
   interface VideoFile {
     path: string;
@@ -10,60 +35,161 @@
     size?: number;
   }
 
-  let videos = $state<VideoFile[]>([]);
-  let selectedVideo = $state<VideoFile | null>(null);
+  function handleImport(videos: VideoFile[]) {
+    for (const video of videos) {
+      // For now, use a default duration of 10 seconds
+      // In a real app, you'd get this from video metadata
+      const duration = 10;
+      
+      // Calculate the end position of the last clip
+      let startTime = 0;
+      if (timelineClips.length > 0) {
+        const lastClip = timelineClips[timelineClips.length - 1];
+        startTime = lastClip.endTime;
+      }
+      
+      const newClip: TimelineClip = {
+        id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        videoUrl: video.url,
+        videoPath: video.path,
+        name: video.name,
+        startTime: startTime,
+        endTime: startTime + duration
+      };
 
-  function handleImport(importedVideos: VideoFile[]) {
-    // Filter out duplicates based on path
-    const existingPaths = new Set(videos.map(v => v.path));
-    const newVideos = importedVideos.filter(v => !existingPaths.has(v.path));
-    videos = [...videos, ...newVideos];
+      timelineClips = [...timelineClips, newClip];
+    }
   }
 
-  function handleVideoSelect(video: VideoFile) {
-    selectedVideo = video;
+  function handleFileImport(files: File[]) {
+    for (const file of files) {
+      const videoUrl = URL.createObjectURL(file);
+      
+      // For now, use a default duration of 10 seconds
+      const duration = 10;
+      
+      // Calculate the end position of the last clip
+      let startTime = 0;
+      if (timelineClips.length > 0) {
+        const lastClip = timelineClips[timelineClips.length - 1];
+        startTime = lastClip.endTime;
+      }
+      
+      const newClip: TimelineClip = {
+        id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        videoUrl: videoUrl,
+        videoPath: file.name,
+        name: file.name,
+        startTime: startTime,
+        endTime: startTime + duration
+      };
+
+      timelineClips = [...timelineClips, newClip];
+    }
   }
 
-  function formatFileSize(bytes: number): string {
-    if (!bytes) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+  function handleVideoDrop(dropData: any) {
+    console.log('handleVideoDrop called with:', dropData);
+    
+    if (dropData.type === 'video' && dropData.video) {
+      const video = dropData.video;
+      console.log('Adding video to timeline:', video);
+      
+      // Calculate the end position of the last clip
+      let startTime = 0;
+      if (timelineClips.length > 0) {
+        const lastClip = timelineClips[timelineClips.length - 1];
+        startTime = lastClip.endTime;
+      }
+
+      const duration = 10;
+      
+      const newClip: TimelineClip = {
+        id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        videoUrl: video.url,
+        videoPath: video.path,
+        name: video.name,
+        startTime: startTime,
+        endTime: startTime + duration
+      };
+
+      timelineClips = [...timelineClips, newClip];
+    }
+  }
+
+  function handleClipSelect(clip: TimelineClip) {
+    console.log('Clip selected:', clip);
+    selectedClip = clip;
+  }
+
+  function handleClipUpdate(clipId: string, startTime: number, endTime: number) {
+    // Update the clip in the timeline
+    timelineClips = timelineClips.map(clip => {
+      if (clip.id === clipId) {
+        return { ...clip, startTime, endTime };
+      }
+      return clip;
+    });
+    
+    console.log(`Updated clip ${clipId} to ${startTime}s - ${endTime}s`);
+  }
+
+  function handleTimeSeek(time: number) {
+    console.log('Timeline seeking to time:', time);
+    currentTime = time;
+  }
+
+  function handleTimeUpdate(time: number) {
+    currentTime = time;
+  }
+
+  function handleFileDrop(event: DragEvent) {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer?.files || []);
+    const videoFiles = files.filter(file => file.type.startsWith('video/'));
+    if (videoFiles.length > 0) {
+      handleFileImport(videoFiles);
+    }
+  }
+
+  function handleDragOver(event: DragEvent) {
+    event.preventDefault();
   }
 </script>
 
-<div class="app-container">
+<div class="app-container" ondrop={handleFileDrop} ondragover={handleDragOver} role="application">
   <div class="top-section">
-    <div class="left-panel">
-      <h2 class="panel-title">Media Library</h2>
-      <div class="import-container">
+    <div class="preview-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Preview</h2>
         <ImportButton onImport={handleImport} />
       </div>
-      <MediaLibrary {videos} onSelect={handleVideoSelect} />
-    </div>
-
-    <div class="right-panel">
-      <h2 class="panel-title">Preview</h2>
-      {#if selectedVideo}
+      {#if selectedClip}
         <VideoPlayer 
-          videoUrl={selectedVideo.url} 
-          videoPath={selectedVideo.path}
-          videoName={selectedVideo.name}
-          metadata={null} 
+          videoUrl={selectedClip.videoUrl} 
+          videoPath={selectedClip.videoPath}
+          videoName={selectedClip.name}
+          metadata={null}
+          currentTime={currentTime}
+          onTimeUpdate={handleTimeUpdate}
         />
       {:else}
         <div class="no-preview">
-          <p>Select a video to preview</p>
+          <p>Click a clip to preview</p>
         </div>
       {/if}
     </div>
   </div>
 
   <div class="bottom-section">
-    <div class="timeline-placeholder">
-      <p>Timeline - Coming Soon</p>
-    </div>
+    <Timeline 
+      clips={timelineClips} 
+      onClipSelect={handleClipSelect}
+      onDrop={handleVideoDrop}
+      onClipUpdate={handleClipUpdate}
+      currentTime={currentTime}
+      onTimeSeek={handleTimeSeek}
+    />
   </div>
 </div>
 
@@ -79,13 +205,11 @@
   .top-section {
     height: 50%;
     display: flex;
-    gap: 0;
     overflow: hidden;
   }
 
-  .left-panel,
-  .right-panel {
-    width: 50%;
+  .preview-panel {
+    width: 100%;
     display: flex;
     flex-direction: column;
     padding: 1rem;
@@ -93,21 +217,20 @@
     background: var(--bg-secondary, #2a2a2a);
   }
 
-  .left-panel {
-    border-right: 1px solid var(--border, #3a3a3a);
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
   }
 
   .panel-title {
-    margin: 0 0 1rem 0;
+    margin: 0;
     font-size: 1.1rem;
     font-weight: 600;
     color: var(--text, #f6f6f6);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .import-container {
-    margin-bottom: 1rem;
   }
 
   .no-preview {
@@ -131,37 +254,22 @@
     border-top: 1px solid var(--border, #3a3a3a);
   }
 
-  .timeline-placeholder {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-  }
-
-  .timeline-placeholder p {
-    color: var(--text-secondary, #888);
-    font-size: 1.1rem;
-  }
 
   /* Scrollbar styling */
-  .left-panel::-webkit-scrollbar,
-  .right-panel::-webkit-scrollbar {
+  .preview-panel::-webkit-scrollbar {
     width: 8px;
   }
 
-  .left-panel::-webkit-scrollbar-track,
-  .right-panel::-webkit-scrollbar-track {
+  .preview-panel::-webkit-scrollbar-track {
     background: var(--bg-primary, #1a1a1a);
   }
 
-  .left-panel::-webkit-scrollbar-thumb,
-  .right-panel::-webkit-scrollbar-thumb {
+  .preview-panel::-webkit-scrollbar-thumb {
     background: var(--border, #3a3a3a);
     border-radius: 4px;
   }
 
-  .left-panel::-webkit-scrollbar-thumb:hover,
-  .right-panel::-webkit-scrollbar-thumb:hover {
+  .preview-panel::-webkit-scrollbar-thumb:hover {
     background: var(--text-secondary, #555);
   }
 
@@ -170,10 +278,8 @@
       background: var(--bg-primary, #f0f0f0);
     }
 
-    .left-panel,
-    .right-panel {
+    .preview-panel {
       background: var(--bg-secondary, #ffffff);
-      border-color: var(--border, #e0e0e0);
     }
 
     .panel-title {
@@ -194,22 +300,15 @@
       border-top-color: var(--border, #e0e0e0);
     }
 
-    .timeline-placeholder p {
-      color: var(--text-secondary, #666);
-    }
-
-    .left-panel::-webkit-scrollbar-track,
-    .right-panel::-webkit-scrollbar-track {
+    .preview-panel::-webkit-scrollbar-track {
       background: var(--bg-primary, #f0f0f0);
     }
 
-    .left-panel::-webkit-scrollbar-thumb,
-    .right-panel::-webkit-scrollbar-thumb {
+    .preview-panel::-webkit-scrollbar-thumb {
       background: var(--border, #e0e0e0);
     }
 
-    .left-panel::-webkit-scrollbar-thumb:hover,
-    .right-panel::-webkit-scrollbar-thumb:hover {
+    .preview-panel::-webkit-scrollbar-thumb:hover {
       background: var(--text-secondary, #999);
     }
   }

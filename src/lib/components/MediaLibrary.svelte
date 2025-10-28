@@ -13,8 +13,27 @@
 
   let { videos, onSelect }: Props = $props();
 
+  let draggedVideo = $state<Video | null>(null);
+
   function handleClick(video: Video) {
     onSelect?.(video);
+  }
+
+  function handleDragStart(video: Video, e: DragEvent) {
+    if (e.dataTransfer) {
+      draggedVideo = video;
+      const dragData = {
+        type: 'video',
+        video: video
+      };
+      console.log('Drag start - setting data:', dragData);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
+    }
+  }
+
+  function handleDragEnd() {
+    draggedVideo = null;
   }
 
   function formatFileSize(bytes: number): string {
@@ -37,7 +56,15 @@
   {:else}
     <div class="video-grid">
       {#each videos as video (video.path)}
-        <button type="button" class="video-card" onclick={() => handleClick(video)}>
+        <button 
+          type="button" 
+          class="video-card" 
+          class:dragging={draggedVideo?.path === video.path}
+          onclick={() => handleClick(video)}
+          draggable="true"
+          ondragstart={(e) => handleDragStart(video, e)}
+          ondragend={handleDragEnd}
+        >
           <div class="video-thumbnail">
             <video src={video.url} preload="metadata" muted></video>
             <div class="video-overlay">
@@ -99,6 +126,11 @@
   .video-card:hover {
     transform: translateY(-4px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .video-card.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
   }
 
   .video-thumbnail {
