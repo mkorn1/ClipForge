@@ -46,7 +46,12 @@
     <div class="right-panel">
       <h2 class="panel-title">Preview</h2>
       {#if selectedVideo}
-        <VideoPlayer videoUrl={selectedVideo.url} metadata={null} />
+        <VideoPlayer 
+          videoUrl={selectedVideo.url} 
+          videoPath={selectedVideo.path}
+          videoName={selectedVideo.name}
+          metadata={null} 
+        />
       {:else}
         <div class="no-preview">
           <p>Select a video to preview</p>

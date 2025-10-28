@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { open, save } from "@tauri-apps/plugin-dialog";
+  import { invoke } from "@tauri-apps/api/core";
 
   interface Props {
     videoUrl?: string;
+    videoPath?: string;
+    videoName?: string;
     metadata?: {
       width: number;
       height: number;
@@ -11,7 +15,7 @@
     } | null;
   }
 
-  let { videoUrl = "", metadata = null }: Props = $props();
+  let { videoUrl = "", videoPath, videoName = "export", metadata = null }: Props = $props();
 
   let videoElement = $state<HTMLVideoElement | null>(null);
   let isPlaying = $state(false);
@@ -20,6 +24,8 @@
   let isDragging = $state(false);
   let errorMessage = $state<string | null>(null);
   let isLoading = $state(true);
+  let isExporting = $state(false);
+  let exportMessage = $state<string | null>(null);
 
   // Reset loading state when video URL changes
   $effect(() => {
@@ -103,6 +109,59 @@
       togglePlay();
     }
   }
+
+  async function handleExport() {
+    if (!videoPath) {
+      exportMessage = "Error: No video path available";
+      return;
+    }
+
+    isExporting = true;
+    exportMessage = null;
+
+    try {
+      // Open save dialog
+      const destination = await save({
+        title: "Export Video",
+        defaultPath: `${videoName}_export.mp4`,
+        filters: [
+          {
+            name: "Video",
+            extensions: ["mp4", "mov", "webm"],
+          },
+        ],
+      });
+
+      if (!destination) {
+        isExporting = false;
+        return; // User cancelled
+      }
+
+      // Call the Rust backend to export the video
+      const result = await invoke("export_video", {
+        sourcePath: videoPath,
+        destinationPath: destination,
+      });
+
+      if (result && typeof result === "object" && "success" in result) {
+        const exportResult = result as { success: boolean; message: string; output_path?: string };
+        if (exportResult.success) {
+          exportMessage = `✓ ${exportResult.message}`;
+        } else {
+          exportMessage = `Error: ${exportResult.message}`;
+        }
+      }
+    } catch (error) {
+      console.error("Export error:", error);
+      exportMessage = `Error: ${error instanceof Error ? error.message : "Unknown error"}`;
+    } finally {
+      isExporting = false;
+      // Clear message after 3 seconds
+      setTimeout(() => {
+        exportMessage = null;
+      }, 3000);
+    }
+  }
 </script>
 
 <svelte:window onkeypress={handleKeyPress} />
@@ -146,6 +205,28 @@
         <span>{formatTime(duration)}</span>
       </div>
     </div>
+
+    {#if isExporting}
+      <div class="export-status">
+        <div class="export-loading">Exporting video...</div>
+      </div>
+    {:else if exportMessage}
+      <div class="export-status">
+        <div class="export-message">{exportMessage}</div>
+      </div>
+    {/if}
+
+    {#if videoPath}
+      <div class="export-section">
+        <button class="export-button" onclick={handleExport} disabled={isExporting}>
+          {#if isExporting}
+            Exporting...
+          {:else}
+            💾 Export Video
+          {/if}
+        </button>
+      </div>
+    {/if}
 
     {#if metadata}
       <div class="metadata">
@@ -303,6 +384,52 @@
     color: var(--text, #0f0f0f);
   }
 
+  .export-section {
+    padding: 0.5rem;
+  }
+
+  .export-button {
+    width: 100%;
+    background: var(--accent, #396cd8);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .export-button:hover:not(:disabled) {
+    background: var(--accent-hover, #295bb8);
+    transform: translateY(-1px);
+  }
+
+  .export-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .export-status {
+    padding: 0.5rem;
+  }
+
+  .export-loading {
+    text-align: center;
+    color: var(--accent, #396cd8);
+    font-size: 0.9rem;
+  }
+
+  .export-message {
+    text-align: center;
+    color: var(--text, #0f0f0f);
+    font-size: 0.9rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    background: var(--bg-tertiary, #f5f5f5);
+  }
+
   @media (prefers-color-scheme: dark) {
     .video-player {
       background: var(--bg-secondary, #1f1f1f);
@@ -318,6 +445,11 @@
 
     .time-display {
       color: var(--text-secondary, #ccc);
+    }
+
+    .export-message {
+      color: var(--text, #f6f6f6);
+      background: var(--bg-tertiary, #2f2f2f);
     }
   }
 </style>
