@@ -301,8 +301,8 @@
   .controls {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.5rem;
+    gap: 0.35rem;
+    /* padding: 0.075rem 0.15rem; */
   }
 
   .play-button {
@@ -310,9 +310,9 @@
     color: white;
     border: none;
     border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    font-size: 1rem;
+    width: 28px;
+    height: 28px;
+    font-size: 0.7rem;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -339,9 +339,9 @@
   .seek-bar {
     position: relative;
     width: 100%;
-    height: 8px;
+    height: 4px;
     background: var(--border, #e0e0e0);
-    border-radius: 4px;
+    border-radius: 2px;
   }
 
   .seek-progress {
@@ -350,14 +350,14 @@
     left: 0;
     height: 100%;
     background: var(--accent, #396cd8);
-    border-radius: 4px;
+    border-radius: 2px;
     transition: width 0.1s linear;
   }
 
   .time-display {
     display: flex;
-    gap: 0.25rem;
-    font-size: 0.9rem;
+    gap: 0.15rem;
+    font-size: 0.7rem;
     color: var(--text-secondary, #666);
   }
 
@@ -385,7 +385,7 @@
   }
 
   .export-section {
-    padding: 0.5rem;
+    padding: 0.25rem;
   }
 
   .export-button {
@@ -393,9 +393,9 @@
     background: var(--accent, #396cd8);
     color: white;
     border: none;
-    border-radius: 6px;
-    padding: 0.75rem 1rem;
-    font-size: 1rem;
+    border-radius: 4px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;

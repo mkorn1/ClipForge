@@ -140,9 +140,9 @@
 
 <style>
   .import-area {
-    padding: 1rem;
-    border: 2px dashed var(--border, #ccc);
-    border-radius: 6px;
+    padding: 0.4rem 0.5rem;
+    border: 1px dashed var(--border, #ccc);
+    border-radius: 4px;
     background: var(--bg-tertiary, #f9f9f9);
     text-align: center;
     transition: all 0.2s;
@@ -157,13 +157,13 @@
     background: var(--accent, #396cd8);
     color: white;
     border: none;
-    border-radius: 6px;
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
+    border-radius: 4px;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   }
 
   .import-button:hover {
@@ -176,9 +176,9 @@
   }
 
   .import-hint {
-    margin: 0.5rem 0 0 0;
+    margin: 0.2rem 0 0 0;
     color: var(--text-secondary, #666);
-    font-size: 0.9rem;
+    font-size: 0.7rem;
   }
 
   @media (prefers-color-scheme: dark) {
