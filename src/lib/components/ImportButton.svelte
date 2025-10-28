@@ -140,10 +140,10 @@
 
 <style>
   .import-area {
-    padding: 2rem;
+    padding: 1rem;
     border: 2px dashed var(--border, #ccc);
-    border-radius: 8px;
-    background: var(--bg-secondary, #f9f9f9);
+    border-radius: 6px;
+    background: var(--bg-tertiary, #f9f9f9);
     text-align: center;
     transition: all 0.2s;
   }
@@ -157,9 +157,9 @@
     background: var(--accent, #396cd8);
     color: white;
     border: none;
-    border-radius: 8px;
-    padding: 0.75rem 1.5rem;
-    font-size: 1rem;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;

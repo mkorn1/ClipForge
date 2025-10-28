@@ -3,7 +3,7 @@
     path: string;
     name: string;
     url: string;
-    size: number;
+    size?: number;
   }
 
   interface Props {
@@ -46,7 +46,7 @@
           </div>
           <div class="video-info">
             <h3 class="video-name" title={video.name}>{video.name}</h3>
-            <p class="video-size">{formatFileSize(video.size)}</p>
+            <p class="video-size">{formatFileSize(video.size || 0)}</p>
           </div>
         </button>
       {/each}
@@ -56,17 +56,14 @@
 
 <style>
   .media-library {
-    padding: 1rem;
-    background: var(--bg-secondary, #ffffff);
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .library-title {
-    margin: 0 0 1rem 0;
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: var(--text, #0f0f0f);
+    display: none;
   }
 
   .empty-state {
@@ -84,6 +81,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 1rem;
+    overflow-y: auto;
+    flex: 1;
   }
 
   .video-card {

@@ -33,132 +33,179 @@
   }
 </script>
 
-<div class="container">
-  <header class="header">
-    <h1>ClipForge</h1>
-    <p class="subtitle">Fast Video Editor</p>
-  </header>
-
-  <main class="main-content">
-    <div class="import-section">
-      <ImportButton onImport={handleImport} />
+<div class="app-container">
+  <div class="top-section">
+    <div class="left-panel">
+      <h2 class="panel-title">Media Library</h2>
+      <div class="import-container">
+        <ImportButton onImport={handleImport} />
+      </div>
+      <MediaLibrary {videos} onSelect={handleVideoSelect} />
     </div>
 
-    <div class="workspace">
-      <div class="library-section">
-        <MediaLibrary {videos} onSelect={handleVideoSelect} />
-      </div>
-
-      <div class="preview-section">
-        <h2 class="preview-title">Preview</h2>
-        {#if selectedVideo}
-          <VideoPlayer videoUrl={selectedVideo.url} metadata={null} />
-        {:else}
-          <div class="no-preview">
-            <p>Select a video to preview</p>
-          </div>
-        {/if}
-      </div>
+    <div class="right-panel">
+      <h2 class="panel-title">Preview</h2>
+      {#if selectedVideo}
+        <VideoPlayer videoUrl={selectedVideo.url} metadata={null} />
+      {:else}
+        <div class="no-preview">
+          <p>Select a video to preview</p>
+        </div>
+      {/if}
     </div>
-  </main>
+  </div>
+
+  <div class="bottom-section">
+    <div class="timeline-placeholder">
+      <p>Timeline - Coming Soon</p>
+    </div>
+  </div>
 </div>
 
 <style>
-  .container {
-    min-height: 100vh;
-    background: var(--bg-primary, #f6f6f6);
+  .app-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-primary, #1a1a1a);
+  }
+
+  .top-section {
+    height: 50%;
+    display: flex;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .left-panel,
+  .right-panel {
+    width: 50%;
+    display: flex;
+    flex-direction: column;
     padding: 1rem;
+    overflow-y: auto;
+    background: var(--bg-secondary, #2a2a2a);
   }
 
-  .header {
-    text-align: center;
-    margin-bottom: 2rem;
+  .left-panel {
+    border-right: 1px solid var(--border, #3a3a3a);
   }
 
-  .header h1 {
-    margin: 0;
-    font-size: 2.5rem;
-    font-weight: 600;
-    color: var(--text, #0f0f0f);
-  }
-
-  .subtitle {
-    margin: 0.5rem 0 0 0;
-    color: var(--text-secondary, #666);
-    font-size: 1rem;
-  }
-
-  .main-content {
-    max-width: 1400px;
-    margin: 0 auto;
-  }
-
-  .import-section {
-    margin-bottom: 2rem;
-  }
-
-  .workspace {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
-
-  .library-section,
-  .preview-section {
-    min-height: 400px;
-  }
-
-  .preview-title {
+  .panel-title {
     margin: 0 0 1rem 0;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     font-weight: 600;
-    color: var(--text, #0f0f0f);
+    color: var(--text, #f6f6f6);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .import-container {
+    margin-bottom: 1rem;
   }
 
   .no-preview {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 400px;
-    background: var(--bg-secondary, #ffffff);
+    flex: 1;
+    background: var(--bg-tertiary, #1a1a1a);
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border: 2px dashed var(--border, #3a3a3a);
   }
 
   .no-preview p {
-    color: var(--text-secondary, #666);
+    color: var(--text-secondary, #888);
+    font-size: 1rem;
+  }
+
+  .bottom-section {
+    height: 50%;
+    background: var(--bg-primary, #1a1a1a);
+    border-top: 1px solid var(--border, #3a3a3a);
+  }
+
+  .timeline-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+
+  .timeline-placeholder p {
+    color: var(--text-secondary, #888);
     font-size: 1.1rem;
   }
 
-  @media (max-width: 1024px) {
-    .workspace {
-      grid-template-columns: 1fr;
-    }
+  /* Scrollbar styling */
+  .left-panel::-webkit-scrollbar,
+  .right-panel::-webkit-scrollbar {
+    width: 8px;
   }
 
-  @media (prefers-color-scheme: dark) {
-    .container {
-      background: var(--bg-primary, #1e1e1e);
+  .left-panel::-webkit-scrollbar-track,
+  .right-panel::-webkit-scrollbar-track {
+    background: var(--bg-primary, #1a1a1a);
+  }
+
+  .left-panel::-webkit-scrollbar-thumb,
+  .right-panel::-webkit-scrollbar-thumb {
+    background: var(--border, #3a3a3a);
+    border-radius: 4px;
+  }
+
+  .left-panel::-webkit-scrollbar-thumb:hover,
+  .right-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary, #555);
+  }
+
+  @media (prefers-color-scheme: light) {
+    .app-container {
+      background: var(--bg-primary, #f0f0f0);
     }
 
-    .header h1 {
-      color: var(--text, #f6f6f6);
+    .left-panel,
+    .right-panel {
+      background: var(--bg-secondary, #ffffff);
+      border-color: var(--border, #e0e0e0);
     }
 
-    .subtitle {
-      color: var(--text-secondary, #ccc);
-    }
-
-    .preview-title {
-      color: var(--text, #f6f6f6);
+    .panel-title {
+      color: var(--text, #0f0f0f);
     }
 
     .no-preview {
-      background: var(--bg-secondary, #1f1f1f);
+      background: var(--bg-tertiary, #f9f9f9);
+      border-color: var(--border, #e0e0e0);
     }
 
     .no-preview p {
-      color: var(--text-secondary, #ccc);
+      color: var(--text-secondary, #666);
+    }
+
+    .bottom-section {
+      background: var(--bg-primary, #f0f0f0);
+      border-top-color: var(--border, #e0e0e0);
+    }
+
+    .timeline-placeholder p {
+      color: var(--text-secondary, #666);
+    }
+
+    .left-panel::-webkit-scrollbar-track,
+    .right-panel::-webkit-scrollbar-track {
+      background: var(--bg-primary, #f0f0f0);
+    }
+
+    .left-panel::-webkit-scrollbar-thumb,
+    .right-panel::-webkit-scrollbar-thumb {
+      background: var(--border, #e0e0e0);
+    }
+
+    .left-panel::-webkit-scrollbar-thumb:hover,
+    .right-panel::-webkit-scrollbar-thumb:hover {
+      background: var(--text-secondary, #999);
     }
   }
 </style>
