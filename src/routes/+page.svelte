@@ -8,6 +8,7 @@
     videoUrl: string;
     videoPath: string;
     name: string;
+    duration: number;
     startTime: number;
     endTime: number;
   }
@@ -15,6 +16,8 @@
   let timelineClips = $state<TimelineClip[]>([]);
   let selectedClip = $state<TimelineClip | null>(null);
   let currentTime = $state(0);
+  let isScrubbing = $state(false);
+  let wasPlayingBeforeScrub = $state(false);
 
   function getMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
@@ -28,6 +31,19 @@
     return mimeTypes[ext || ""] || "video/mp4";
   }
 
+  function getVideoDuration(videoUrl: string): Promise<number> {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.src = videoUrl;
+      video.addEventListener('loadedmetadata', () => {
+        resolve(video.duration || 10);
+      });
+      video.addEventListener('error', () => {
+        resolve(10); // Fallback to 10 seconds on error
+      });
+    });
+  }
+
   interface VideoFile {
     path: string;
     name: string;
@@ -35,11 +51,9 @@
     size?: number;
   }
 
-  function handleImport(videos: VideoFile[]) {
+  async function handleImport(videos: VideoFile[]) {
     for (const video of videos) {
-      // For now, use a default duration of 10 seconds
-      // In a real app, you'd get this from video metadata
-      const duration = 10;
+      const duration = await getVideoDuration(video.url);
       
       // Calculate the end position of the last clip
       let startTime = 0;
@@ -53,6 +67,7 @@
         videoUrl: video.url,
         videoPath: video.path,
         name: video.name,
+        duration: duration,
         startTime: startTime,
         endTime: startTime + duration
       };
@@ -61,12 +76,11 @@
     }
   }
 
-  function handleFileImport(files: File[]) {
+  async function handleFileImport(files: File[]) {
     for (const file of files) {
       const videoUrl = URL.createObjectURL(file);
       
-      // For now, use a default duration of 10 seconds
-      const duration = 10;
+      const duration = await getVideoDuration(videoUrl);
       
       // Calculate the end position of the last clip
       let startTime = 0;
@@ -80,6 +94,7 @@
         videoUrl: videoUrl,
         videoPath: file.name,
         name: file.name,
+        duration: duration,
         startTime: startTime,
         endTime: startTime + duration
       };
@@ -88,7 +103,7 @@
     }
   }
 
-  function handleVideoDrop(dropData: any) {
+  async function handleVideoDrop(dropData: any) {
     console.log('handleVideoDrop called with:', dropData);
     
     if (dropData.type === 'video' && dropData.video) {
@@ -102,13 +117,14 @@
         startTime = lastClip.endTime;
       }
 
-      const duration = 10;
+      const duration = await getVideoDuration(video.url);
       
       const newClip: TimelineClip = {
         id: `clip-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         videoUrl: video.url,
         videoPath: video.path,
         name: video.name,
+        duration: duration,
         startTime: startTime,
         endTime: startTime + duration
       };
@@ -136,11 +152,25 @@
 
   function handleTimeSeek(time: number) {
     console.log('Timeline seeking to time:', time);
+    
+    // Track that we're scrubbing
+    if (!isScrubbing) {
+      wasPlayingBeforeScrub = false; // TODO: track actual play state
+      isScrubbing = true;
+    }
+    
     currentTime = time;
   }
 
   function handleTimeUpdate(time: number) {
-    currentTime = time;
+    if (!isScrubbing) {
+      currentTime = time;
+    }
+  }
+
+  function handleScrubEnd() {
+    isScrubbing = false;
+    wasPlayingBeforeScrub = false;
   }
 
   function handleFileDrop(event: DragEvent) {
@@ -189,6 +219,7 @@
       onClipUpdate={handleClipUpdate}
       currentTime={currentTime}
       onTimeSeek={handleTimeSeek}
+      onScrubEnd={handleScrubEnd}
     />
   </div>
 </div>

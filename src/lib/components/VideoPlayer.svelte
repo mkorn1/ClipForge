@@ -19,13 +19,6 @@
 
   let { videoUrl = "", videoPath, videoName = "export", metadata = null, currentTime = 0, onTimeUpdate }: Props = $props();
 
-  // Update video time when external currentTime changes
-  $effect(() => {
-    if (videoElement && currentTime !== undefined && Math.abs(videoElement.currentTime - currentTime) > 0.1) {
-      videoElement.currentTime = currentTime;
-    }
-  });
-
   let videoElement = $state<HTMLVideoElement | null>(null);
   let isPlaying = $state(false);
   let internalCurrentTime = $state(0);
@@ -35,6 +28,19 @@
   let isLoading = $state(true);
   let isExporting = $state(false);
   let exportMessage = $state<string | null>(null);
+  let isExternalSeeking = $state(false); // Track when scrubbing from timeline
+
+  // Update video time when external currentTime changes (from timeline scrubber)
+  $effect(() => {
+    if (videoElement && currentTime !== undefined) {
+      // Only update if the difference is significant to avoid feedback loops
+      const diff = Math.abs(videoElement.currentTime - currentTime);
+      if (diff > 0.05) {
+        isExternalSeeking = true;
+        videoElement.currentTime = currentTime;
+      }
+    }
+  });
 
   // Reset loading state when video URL changes
   $effect(() => {
@@ -55,11 +61,20 @@
       });
 
       videoElement.addEventListener("timeupdate", () => {
-        if (!isDragging) {
+        if (!isDragging && !isExternalSeeking) {
           internalCurrentTime = videoElement!.currentTime;
           if (onTimeUpdate) {
             onTimeUpdate(internalCurrentTime);
           }
+        }
+      });
+
+      videoElement.addEventListener("seeked", () => {
+        // Clear external seeking flag after seek completes
+        if (isExternalSeeking) {
+          setTimeout(() => {
+            isExternalSeeking = false;
+          }, 100);
         }
       });
 

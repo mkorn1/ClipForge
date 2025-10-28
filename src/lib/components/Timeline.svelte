@@ -6,6 +6,7 @@
     videoUrl: string;
     videoPath: string;
     name: string;
+    duration: number;
     startTime: number;
     endTime: number;
   }
@@ -17,9 +18,10 @@
     onClipUpdate?: (clipId: string, startTime: number, endTime: number) => void;
     currentTime?: number;
     onTimeSeek?: (time: number) => void;
+    onScrubEnd?: () => void;
   }
 
-  let { clips = [], onClipSelect, onDrop, onClipUpdate, currentTime = 0, onTimeSeek } = $props();
+  let { clips = [], onClipSelect, onDrop, onClipUpdate, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
 
   const MIN_PIXELS_PER_SECOND = 10;
   const MAX_PIXELS_PER_SECOND = 500;
@@ -62,23 +64,29 @@
   let justFinishedTrimming = $state(false);
   
   // Scrubbing state
-  let isScrubbing = $state(false);
+  let isDraggingScrubber = $state(false);
+  let justFinishedScrubbing = $state(false);
 
   const totalDuration = $derived(clips.length > 0 
     ? Math.max(...clips.map(c => c.endTime))
     : 0);
 
   // Calculate pixels per second based on timeline wrapper visible width
-  let visibleWidth = $derived(wrapperElement ? wrapperElement.clientWidth : 1920);
+  let visibleWidth = $derived(wrapperElement && wrapperElement.clientWidth > 0 
+    ? wrapperElement.clientWidth 
+    : 1920);
   
+  // Use a fixed base zoom level - don't auto-fit to window size
+  // This ensures the timeline is always scrollable
+  const BASE_PIXELS_PER_SECOND = 30; // Show 30 seconds per 900px
   const PIXELS_PER_SECOND = $derived(
     totalDuration > 0 
-      ? Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, visibleWidth / totalDuration))
-      : 60
+      ? BASE_PIXELS_PER_SECOND
+      : BASE_PIXELS_PER_SECOND
   );
 
   const timelineWidth = $derived(totalDuration * PIXELS_PER_SECOND);
-  const contentWidth = $derived(Math.max(visibleWidth, timelineWidth));
+  const contentWidth = $derived(Math.max(visibleWidth, timelineWidth, MIN_PIXELS_PER_SECOND * 10));
 
   function timeToX(time: number): number {
     return time * PIXELS_PER_SECOND;
@@ -86,6 +94,55 @@
 
   function xToTime(x: number): number {
     return x / PIXELS_PER_SECOND;
+  }
+
+  function drawTimeMarkers(ctx: CanvasRenderingContext2D, width: number) {
+    if (totalDuration === 0) return;
+    
+    // Determine interval based on zoom level
+    const secondsPerPixel = 1 / PIXELS_PER_SECOND;
+    let markerInterval: number;
+    
+    if (PIXELS_PER_SECOND > 100) {
+      // Very zoomed in - show seconds
+      markerInterval = 1;
+    } else if (PIXELS_PER_SECOND > 50) {
+      // Zoomed in - show every 2 seconds
+      markerInterval = 2;
+    } else if (PIXELS_PER_SECOND > 20) {
+      // Medium zoom - show every 5 seconds
+      markerInterval = 5;
+    } else {
+      // Zoomed out - show every 10 seconds
+      markerInterval = 10;
+    }
+    
+    ctx.strokeStyle = BORDER_COLOR;
+    ctx.lineWidth = 1;
+    ctx.fillStyle = TEXT_COLOR;
+    ctx.font = "10px system-ui, -apple-system, sans-serif";
+    ctx.textBaseline = "top";
+    
+    // Draw markers
+    for (let time = 0; time <= totalDuration; time += markerInterval) {
+      const x = timeToX(time);
+      if (x > width) break;
+      
+      // Draw tick line
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, HEADER_HEIGHT);
+      ctx.stroke();
+      
+      // Draw time label
+      const minutes = Math.floor(time / 60);
+      const seconds = Math.floor(time % 60);
+      const label = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      
+      // Center the label
+      const metrics = ctx.measureText(label);
+      ctx.fillText(label, x - metrics.width / 2, 4);
+    }
   }
 
   function drawTimeline() {
@@ -99,6 +156,9 @@
 
     ctx.fillStyle = HEADER_BG;
     ctx.fillRect(0, 0, width, HEADER_HEIGHT);
+    
+    // Draw time markers in header
+    drawTimeMarkers(ctx, width);
     
     ctx.strokeStyle = BORDER_COLOR;
     ctx.lineWidth = 1;
@@ -196,6 +256,20 @@
     return null;
   }
 
+  function isClickingScrubberHandle(x: number, y: number): boolean {
+    if (currentTime <= 0 || currentTime > totalDuration) return false;
+    
+    const scrubberX = timeToX(currentTime);
+    const handleRadius = 12; // Make it easier to grab
+    const handleY = HEADER_HEIGHT + TRACK_HEIGHT / 2;
+    
+    const dx = x - scrubberX;
+    const dy = y - handleY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    return distance <= handleRadius;
+  }
+
   function getTrimHandleAtPosition(x: number, y: number, clip: TimelineClip): 'left' | 'right' | null {
     if (y < HEADER_HEIGHT || y > HEADER_HEIGHT + TRACK_HEIGHT) {
       return null;
@@ -227,6 +301,14 @@
     
     const clip = getClipAtPosition(x, y);
     hoveredClip = clip;
+    
+    // Check if hovering over scrubber handle first
+    if (isClickingScrubberHandle(x, y)) {
+      trimHandle = null;
+      overlayElement.style.cursor = "grab";
+      drawTimeline();
+      return;
+    }
     
     // Check if hovering over trim handle
     let handle = null;
@@ -261,6 +343,16 @@
     
     console.log(`Timeline mousedown: raw mouse x=${e.clientX - rect.left}px, scrollLeft=${scrollLeft}px, adjusted x=${x.toFixed(2)}px`);
     
+    // Check if clicking on scrubber handle
+    if (isClickingScrubberHandle(x, y)) {
+      isDraggingScrubber = true;
+      overlayElement.style.cursor = "grabbing";
+      e.preventDefault();
+      e.stopPropagation();
+      drawTimeline();
+      return;
+    }
+    
     const clip = getClipAtPosition(x, y);
     
     if (clip) {
@@ -293,6 +385,12 @@
     // Skip if we just finished trimming
     if (justFinishedTrimming) {
       justFinishedTrimming = false;
+      return;
+    }
+    
+    // Skip if we just finished scrubbing
+    if (justFinishedScrubbing) {
+      justFinishedScrubbing = false;
       return;
     }
     
@@ -343,8 +441,17 @@
   function handleWheel(e: WheelEvent) {
     // Allow scrolling to pass through to the wrapper
     if (!wrapperElement) return;
-    wrapperElement.scrollLeft += e.deltaX;
-    wrapperElement.scrollTop += e.deltaY;
+    
+    // Check if we should handle horizontal scrolling
+    if (e.deltaX !== 0 || e.shiftKey) {
+      e.preventDefault();
+      wrapperElement.scrollLeft += e.deltaX;
+    }
+    
+    // Allow vertical scrolling if it's vertical wheel
+    if (e.deltaY !== 0 && !e.shiftKey) {
+      wrapperElement.scrollTop += e.deltaY;
+    }
   }
 
   function handleCanvasMouseLeave() {
@@ -353,7 +460,21 @@
   }
 
   function handleCanvasMouseUp(e: MouseEvent) {
-    console.log(`MouseUp: isTrimming=${isTrimming}, trimmingClip=${trimmingClip?.name}, onClipUpdate=${!!onClipUpdate}`);
+    console.log(`MouseUp: isDraggingScrubber=${isDraggingScrubber}, isTrimming=${isTrimming}, trimmingClip=${trimmingClip?.name}, onClipUpdate=${!!onClipUpdate}`);
+    
+    // Handle scrubber drag end
+    if (isDraggingScrubber) {
+      isDraggingScrubber = false;
+      justFinishedScrubbing = true;
+      if (overlayElement) {
+        overlayElement.style.cursor = "default";
+      }
+      if (onScrubEnd) {
+        onScrubEnd();
+      }
+      drawTimeline();
+      return;
+    }
     
     if (isTrimming && trimmingClip) {
       if (onClipUpdate) {
@@ -381,6 +502,22 @@
 
   function handleCanvasGlobalMouseMove(e: MouseEvent) {
     if (!wrapperElement) return;
+    
+    // Handle scrubber dragging
+    if (isDraggingScrubber) {
+      const wrapperRect = wrapperElement.getBoundingClientRect();
+      const scrollLeft = wrapperElement.scrollLeft;
+      const x = e.clientX - wrapperRect.left + scrollLeft;
+      const newTime = xToTime(x);
+      const constrainedTime = Math.max(0, Math.min(totalDuration, newTime));
+      
+      if (onTimeSeek) {
+        onTimeSeek(constrainedTime);
+      }
+      
+      drawTimeline();
+      return;
+    }
     
     // Handle trimming
     if (isTrimming && trimmingClip && trimHandle) {
@@ -460,8 +597,13 @@
     
     canvasContext = canvasElement.getContext('2d', { alpha: false });
     
+    // Set canvas dimensions (internal resolution)
     canvasElement.width = contentWidth;
     canvasElement.height = HEADER_HEIGHT + TRACK_HEIGHT;
+    
+    // Set canvas CSS dimensions (display size)
+    canvasElement.style.width = `${contentWidth}px`;
+    canvasElement.style.height = `${HEADER_HEIGHT + TRACK_HEIGHT}px`;
     
     // Set overlay width to match canvas width
     overlayElement.style.width = `${contentWidth}px`;
@@ -582,7 +724,6 @@
       onclick={handleCanvasClick}
       onmouseup={handleCanvasMouseUp}
       onkeypress={handleCanvasKeyPress}
-      onwheel={handleWheel}
     ></div>
   </div>
 </div>
