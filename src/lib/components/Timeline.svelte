@@ -26,7 +26,6 @@
   let { clips = [], onClipSelect, onDrop, onClipUpdate, onClipsReorder, onClipDelete, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
 
   const MIN_PIXELS_PER_SECOND = 10;
-  const MAX_PIXELS_PER_SECOND = 500;
   const TRACK_HEIGHT = 80;
   const HEADER_HEIGHT = 30;
   const CLIP_TOP_PADDING = 8;
@@ -87,6 +86,13 @@
   let visibleWidth = $derived(wrapperElement && wrapperElement.clientWidth > 0 
     ? wrapperElement.clientWidth 
     : 1920);
+  
+  // Calculate max zoom such that 10% of total duration is visible in viewport
+  const MAX_PIXELS_PER_SECOND = $derived(
+    totalDuration > 0 
+      ? visibleWidth / (0.1 * totalDuration)
+      : 500
+  );
   
   // Use a fixed base zoom level - don't auto-fit to window size
   // This ensures the timeline is always scrollable
@@ -551,8 +557,8 @@
       // Calculate new pixels per second
       const newPixelsPerSecond = pixelsPerSecond * zoomDelta;
       
-      // Clamp to min/max bounds
-      const clampedPixelsPerSecond = Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, newPixelsPerSecond));
+      // Clamp to min bound only (no max limit)
+      const clampedPixelsPerSecond = Math.max(MIN_PIXELS_PER_SECOND, newPixelsPerSecond);
       
       // Only update if within bounds
       if (clampedPixelsPerSecond !== pixelsPerSecond) {
