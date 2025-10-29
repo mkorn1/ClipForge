@@ -17,12 +17,13 @@
     onDrop?: (clipData: any) => void;
     onClipUpdate?: (clipId: string, startTime: number, endTime: number) => void;
     onClipsReorder?: (reorderedClips: TimelineClip[]) => void;
+    onClipDelete?: (clipId: string) => void;
     currentTime?: number;
     onTimeSeek?: (time: number) => void;
     onScrubEnd?: () => void;
   }
 
-  let { clips = [], onClipSelect, onDrop, onClipUpdate, onClipsReorder, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
+  let { clips = [], onClipSelect, onDrop, onClipUpdate, onClipsReorder, onClipDelete, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
 
   const MIN_PIXELS_PER_SECOND = 10;
   const MAX_PIXELS_PER_SECOND = 500;
@@ -72,6 +73,7 @@
   let dragOffsetX = $state(0);
   let previewClip = $state<TimelineClip | null>(null);
   let snapPosition = $state<number | null>(null);
+  let justFinishedDragging = $state(false);
   
   // Scrubbing state
   let isDraggingScrubber = $state(false);
@@ -438,6 +440,12 @@
       return;
     }
     
+    // Skip if we just finished dragging a clip
+    if (justFinishedDragging) {
+      justFinishedDragging = false;
+      return;
+    }
+    
     if (!overlayElement || !wrapperElement) return;
     
     const wrapperRect = wrapperElement.getBoundingClientRect();
@@ -497,6 +505,28 @@
     // Handle keyboard interaction for accessibility
     if (e.key === 'Enter' || e.key === ' ') {
       handleCanvasClick(e as any);
+    }
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    // Handle delete/backspace to remove selected clip
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedClip) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (onClipDelete) {
+        console.log(`Deleting clip "${selectedClip.name}"`);
+        onClipDelete(selectedClip.id);
+        selectedClip = null;
+      }
+      return;
+    }
+    
+    // Escape to deselect
+    if (e.key === 'Escape' && selectedClip) {
+      e.preventDefault();
+      selectedClip = null;
+      drawTimeline();
     }
   }
 
@@ -650,6 +680,7 @@
       draggingClip = null;
       dragOffsetX = 0;
       snapPosition = null;
+      justFinishedDragging = true; // Set flag to prevent selection on click
       if (overlayElement) {
         overlayElement.style.cursor = "default";
       }
@@ -982,6 +1013,7 @@
       onclick={handleCanvasClick}
       onmouseup={handleCanvasMouseUp}
       onkeypress={handleCanvasKeyPress}
+      onkeydown={handleKeyDown}
     ></div>
   </div>
 </div>

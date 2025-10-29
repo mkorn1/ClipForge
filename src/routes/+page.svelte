@@ -156,6 +156,31 @@
     console.log(`Reordered clips. New order:`, reorderedClips.map(c => c.name));
   }
 
+  function handleClipDelete(clipId: string) {
+    // Remove the clip from the timeline
+    const updatedClips = timelineClips.filter(clip => clip.id !== clipId);
+    
+    // Update clip positions to be contiguous
+    let currentTime = 0;
+    timelineClips = updatedClips.map(clip => {
+      const duration = clip.endTime - clip.startTime;
+      const result = {
+        ...clip,
+        startTime: currentTime,
+        endTime: currentTime + duration
+      };
+      currentTime = result.endTime;
+      return result;
+    });
+    
+    // Clear selection if the deleted clip was selected
+    if (selectedClip && selectedClip.id === clipId) {
+      selectedClip = null;
+    }
+    
+    console.log(`Deleted clip ${clipId}. Remaining clips:`, timelineClips.map(c => c.name));
+  }
+
   function handleTimeSeek(time: number) {
     console.log('Timeline seeking to time:', time);
     
@@ -225,6 +250,7 @@
       onDrop={handleVideoDrop}
       onClipUpdate={handleClipUpdate}
       onClipsReorder={handleClipsReorder}
+      onClipDelete={handleClipDelete}
       currentTime={currentTime}
       onTimeSeek={handleTimeSeek}
       onScrubEnd={handleScrubEnd}
