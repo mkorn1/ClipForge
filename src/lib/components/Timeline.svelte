@@ -294,10 +294,10 @@
   function handleCanvasMouseMove(e: MouseEvent) {
     if (!overlayElement || !wrapperElement) return;
     
-    const rect = overlayElement.getBoundingClientRect();
+    const wrapperRect = wrapperElement.getBoundingClientRect();
     const scrollLeft = wrapperElement.scrollLeft;
-    const x = e.clientX - rect.left + scrollLeft;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - wrapperRect.left + scrollLeft;
+    const y = e.clientY - wrapperRect.top;
     
     const clip = getClipAtPosition(x, y);
     hoveredClip = clip;
@@ -336,12 +336,12 @@
   function handleCanvasMouseDown(e: MouseEvent) {
     if (!overlayElement || !wrapperElement) return;
     
-    const rect = overlayElement.getBoundingClientRect();
+    const wrapperRect = wrapperElement.getBoundingClientRect();
     const scrollLeft = wrapperElement.scrollLeft;
-    const x = e.clientX - rect.left + scrollLeft;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - wrapperRect.left + scrollLeft;
+    const y = e.clientY - wrapperRect.top;
     
-    console.log(`Timeline mousedown: raw mouse x=${e.clientX - rect.left}px, scrollLeft=${scrollLeft}px, adjusted x=${x.toFixed(2)}px`);
+    console.log(`Timeline mousedown: raw mouse x=${e.clientX - wrapperRect.left}px, scrollLeft=${scrollLeft}px, adjusted x=${x.toFixed(2)}px`);
     
     // Check if clicking on scrubber handle
     if (isClickingScrubberHandle(x, y)) {
@@ -396,27 +396,45 @@
     
     if (!overlayElement || !wrapperElement) return;
     
-    const rect = overlayElement.getBoundingClientRect();
+    const wrapperRect = wrapperElement.getBoundingClientRect();
     const scrollLeft = wrapperElement.scrollLeft;
-    const x = e.clientX - rect.left + scrollLeft;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - wrapperRect.left + scrollLeft;
+    const y = e.clientY - wrapperRect.top;
     
-    console.log(`Timeline click identifier: raw mouse x=${e.clientX - rect.left}px, scrollLeft=${scrollLeft}px, adjusted x=${x.toFixed(2)}px`);
+    console.log(`Timeline click identifier: raw mouse x=${e.clientX - wrapperRect.left}px, scrollLeft=${scrollLeft}px, adjusted x=${x.toFixed(2)}px`);
     console.log(`Pixels per second: ${PIXELS_PER_SECOND.toFixed(2)}`);
     
-    // Check if clicking on timeline track (not on a clip)
+    // Check if clicking on timeline header (seek to time)
+    if (y >= 0 && y < HEADER_HEIGHT) {
+      if (onTimeSeek) {
+        const seekTime = xToTime(x);
+        const constrainedTime = Math.max(0, Math.min(totalDuration, seekTime));
+        console.log(`Seeking to time (header): ${constrainedTime.toFixed(2)}s`);
+        onTimeSeek(constrainedTime);
+      }
+      drawTimeline();
+      return;
+    }
+    
+    // Check if clicking on timeline track
     if (y >= HEADER_HEIGHT && y < HEADER_HEIGHT + TRACK_HEIGHT) {
       const clip = getClipAtPosition(x, y);
       
       if (clip) {
-        // Clicked on a clip - select it
+        // Clicked on a clip - select it and seek to clicked position
         if (onClipSelect) {
           onClipSelect(clip);
           selectedClip = clip;
         }
         
-        const relativeX = x - timeToX(clip.startTime);
-        const clickTime = clip.startTime + xToTime(relativeX);
+        if (onTimeSeek) {
+          // Seek to the position within the clip that was clicked
+          const relativeX = x - timeToX(clip.startTime);
+          const clickTime = clip.startTime + xToTime(relativeX);
+          const constrainedTime = Math.max(clip.startTime, Math.min(clip.endTime, clickTime));
+          console.log(`Seeking to time (clip): ${constrainedTime.toFixed(2)}s`);
+          onTimeSeek(constrainedTime);
+        }
         
         console.log(`Clicked on clip "${clip.name}"`);
       } else if (onTimeSeek) {
@@ -477,6 +495,17 @@
     }
     
     if (isTrimming && trimmingClip) {
+      // Apply final constraints on release
+      if (trimHandle === 'left') {
+        const minStartTime = 0;
+        const maxStartTime = trimmingClip.endTime - MIN_CLIP_DURATION;
+        trimmingClip.startTime = Math.max(minStartTime, Math.min(maxStartTime, trimmingClip.startTime));
+      } else if (trimHandle === 'right') {
+        const minEndTime = trimmingClip.startTime + MIN_CLIP_DURATION;
+        const maxEndTime = totalDuration;
+        trimmingClip.endTime = Math.max(minEndTime, Math.min(maxEndTime, trimmingClip.endTime));
+      }
+      
       if (onClipUpdate) {
         // Finish trimming - update the clip
         console.log(`Committing trim: ${trimHandle} edge of clip "${trimmingClip.name}"`);
@@ -531,22 +560,13 @@
       console.log(`Trimming: handle=${trimHandle}, newTime=${newTime.toFixed(2)}`);
       
       if (trimHandle === 'left') {
-        // Trim left edge (adjust start time only)
-        const minStartTime = 0;
-        const maxStartTime = trimmingClip.endTime - MIN_CLIP_DURATION;
-        const newStartTime = Math.max(minStartTime, Math.min(maxStartTime, newTime));
-        trimmingClip.startTime = newStartTime;
-        console.log(`Left trim: startTime=${newStartTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
+        // Allow free bidirectional movement - only constrain to absolute timeline boundaries
+        trimmingClip.startTime = Math.max(0, Math.min(trimmingClip.endTime - 0.1, newTime));
+        console.log(`Left trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
       } else if (trimHandle === 'right') {
-        // Trim right edge (adjust end time only)
-        const minEndTime = trimmingClip.startTime + MIN_CLIP_DURATION;
-        // Constrain to total timeline duration to prevent trimming beyond the window
-        // TODO: This should be constrained to the actual video file duration, not totalDuration
-        // which is just the timeline's span. For proper implementation, TimelineClip needs a duration field.
-        const maxEndTime = totalDuration;
-        const newEndTime = Math.max(minEndTime, Math.min(maxEndTime, newTime));
-        trimmingClip.endTime = newEndTime;
-        console.log(`Right trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${newEndTime.toFixed(2)}`);
+        // Allow free bidirectional movement - only constrain to absolute timeline boundaries
+        trimmingClip.endTime = Math.min(totalDuration, Math.max(trimmingClip.startTime + 0.1, newTime));
+        console.log(`Right trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
       }
       
       drawTimeline();
