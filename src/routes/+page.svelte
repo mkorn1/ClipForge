@@ -150,6 +150,12 @@
     console.log(`Updated clip ${clipId} to ${startTime}s - ${endTime}s`);
   }
 
+  function handleClipsReorder(reorderedClips: TimelineClip[]) {
+    // Update the timeline with reordered clips
+    timelineClips = reorderedClips;
+    console.log(`Reordered clips. New order:`, reorderedClips.map(c => c.name));
+  }
+
   function handleTimeSeek(time: number) {
     console.log('Timeline seeking to time:', time);
     
@@ -163,8 +169,9 @@
   }
 
   function handleTimeUpdate(time: number) {
-    if (!isScrubbing) {
-      currentTime = time;
+    if (!isScrubbing && selectedClip) {
+      // Convert video playback time to timeline absolute time
+      currentTime = selectedClip.startTime + time;
     }
   }
 
@@ -217,6 +224,7 @@
       onClipSelect={handleClipSelect}
       onDrop={handleVideoDrop}
       onClipUpdate={handleClipUpdate}
+      onClipsReorder={handleClipsReorder}
       currentTime={currentTime}
       onTimeSeek={handleTimeSeek}
       onScrubEnd={handleScrubEnd}

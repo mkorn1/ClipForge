@@ -16,12 +16,13 @@
     onClipSelect?: (clip: TimelineClip) => void;
     onDrop?: (clipData: any) => void;
     onClipUpdate?: (clipId: string, startTime: number, endTime: number) => void;
+    onClipsReorder?: (reorderedClips: TimelineClip[]) => void;
     currentTime?: number;
     onTimeSeek?: (time: number) => void;
     onScrubEnd?: () => void;
   }
 
-  let { clips = [], onClipSelect, onDrop, onClipUpdate, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
+  let { clips = [], onClipSelect, onDrop, onClipUpdate, onClipsReorder, currentTime = 0, onTimeSeek, onScrubEnd } = $props();
 
   const MIN_PIXELS_PER_SECOND = 10;
   const MAX_PIXELS_PER_SECOND = 500;
@@ -62,6 +63,14 @@
   let originalStartTime = $state(0);
   let originalEndTime = $state(0);
   let justFinishedTrimming = $state(false);
+  
+  // Clip reordering state
+  let isDraggingClip = $state(false);
+  let draggingClip = $state<TimelineClip | null>(null);
+  let dragStartX = $state(0);
+  let dragStartTime = $state(0);
+  let dragOffsetX = $state(0);
+  let previewClip = $state<TimelineClip | null>(null);
   
   // Scrubbing state
   let isDraggingScrubber = $state(false);
@@ -171,18 +180,28 @@
     ctx.fillRect(0, HEADER_HEIGHT, width, TRACK_HEIGHT);
 
     clips.forEach(clip => {
-      const x = timeToX(clip.startTime);
+      let x = timeToX(clip.startTime);
       const clipWidth = timeToX(clip.endTime - clip.startTime);
-      const y = HEADER_HEIGHT + CLIP_TOP_PADDING;
+      let y = HEADER_HEIGHT + CLIP_TOP_PADDING;
       
       const isHovered = hoveredClip?.id === clip.id;
       const isSelected = selectedClip?.id === clip.id;
+      const isDragging = draggingClip?.id === clip.id;
       
-      ctx.fillStyle = isHovered || isSelected ? CLIP_HOVER_COLOR : CLIP_COLOR;
+      // If this is the dragging clip, show preview position
+      if (isDragging && draggingClip) {
+        x = timeToX(dragStartTime) + dragOffsetX;
+        // Add visual indicator that it's being dragged
+        ctx.globalAlpha = 0.6;
+      } else {
+        ctx.globalAlpha = 1;
+      }
+      
+      ctx.fillStyle = isHovered || isSelected || isDragging ? CLIP_HOVER_COLOR : CLIP_COLOR;
       ctx.fillRect(x, y, clipWidth, CLIP_HEIGHT);
       
-      ctx.strokeStyle = CLIP_BORDER_COLOR;
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = isDragging ? "#4a9eff" : CLIP_BORDER_COLOR;
+      ctx.lineWidth = isDragging ? 2 : 1;
       ctx.strokeRect(x, y, clipWidth, CLIP_HEIGHT);
 
       const thumbnailWidth = 60;
@@ -377,6 +396,20 @@
         drawTimeline();
         return; // Don't continue with click handler
       }
+      
+      // Not clicking on trim handle, start dragging the clip (with middle mouse or shift click)
+      // For now, allow any click on the clip body to drag
+      if (e.button === 0 && e.shiftKey === false) {
+        // Regular click - prepare for possible drag if user moves mouse
+        // We'll set this up in mousemove to avoid interfering with click detection
+        dragStartX = x;
+        draggingClip = clip;
+        selectedClip = clip;
+        
+        if (onClipSelect) {
+          onClipSelect(clip);
+        }
+      }
     }
     // If not trimming, let the click handler handle selection
   }
@@ -478,7 +511,7 @@
   }
 
   function handleCanvasMouseUp(e: MouseEvent) {
-    console.log(`MouseUp: isDraggingScrubber=${isDraggingScrubber}, isTrimming=${isTrimming}, trimmingClip=${trimmingClip?.name}, onClipUpdate=${!!onClipUpdate}`);
+    console.log(`MouseUp: isDraggingScrubber=${isDraggingScrubber}, isTrimming=${isTrimming}, trimmingClip=${trimmingClip?.name}, onClipUpdate=${!!onClipUpdate}, isDraggingClip=${isDraggingClip}`);
     
     // Handle scrubber drag end
     if (isDraggingScrubber) {
@@ -492,6 +525,95 @@
       }
       drawTimeline();
       return;
+    }
+    
+    // Handle clip reordering drag end
+    if (isDraggingClip && draggingClip) {
+      console.log(`Completing clip drag for "${draggingClip.name}"`);
+      
+      // Calculate the new time position
+      const newStartTime = dragStartTime + xToTime(dragOffsetX);
+      const clipDuration = draggingClip.endTime - draggingClip.startTime;
+      
+      // Ensure the clip doesn't go before the timeline start
+      const adjustedStartTime = Math.max(0, newStartTime);
+      const adjustedEndTime = adjustedStartTime + clipDuration;
+      
+      // Check for overlaps with other clips and snap to end of previous clip
+      let finalStartTime = adjustedStartTime;
+      const clipsWithoutDragged = clips.filter(c => c.id !== draggingClip!.id);
+      
+      // Sort clips by startTime to find insertion point
+      const sortedClips = [...clipsWithoutDragged].sort((a, b) => a.startTime - b.startTime);
+      
+      // Find where to place this clip without overlapping
+      for (let i = 0; i < sortedClips.length; i++) {
+        const clip = sortedClips[i];
+        
+        // Check if we're dragging to after this clip
+        if (adjustedStartTime >= clip.endTime) {
+          // Place after this clip
+          finalStartTime = clip.endTime;
+        }
+        
+        // Check if we're dragging to before this clip
+        if (adjustedStartTime + clipDuration <= clip.startTime && i === 0) {
+          finalStartTime = 0;
+        }
+      }
+      
+      // Reorder clips and update times
+      const reorderedClips = [...clipsWithoutDragged];
+      
+      // Insert the dragged clip in the correct position
+      let insertIndex = 0;
+      for (let i = 0; i < sortedClips.length; i++) {
+        if (finalStartTime > sortedClips[i].endTime) {
+          insertIndex = i + 1;
+        } else {
+          break;
+        }
+      }
+      
+      const updatedClip = {
+        ...draggingClip,
+        startTime: finalStartTime,
+        endTime: finalStartTime + clipDuration
+      };
+      
+      reorderedClips.splice(insertIndex, 0, updatedClip);
+      
+      // Update remaining clips to be contiguous
+      let currentTime = 0;
+      const finalClips = reorderedClips.map(clip => {
+        const result = {
+          ...clip,
+          startTime: currentTime,
+          endTime: currentTime + (clip.endTime - clip.startTime)
+        };
+        currentTime = result.endTime;
+        return result;
+      });
+      
+      if (onClipsReorder) {
+        console.log(`Calling onClipsReorder with ${finalClips.length} clips`);
+        onClipsReorder(finalClips);
+      }
+      
+      isDraggingClip = false;
+      draggingClip = null;
+      dragOffsetX = 0;
+      if (overlayElement) {
+        overlayElement.style.cursor = "default";
+      }
+      drawTimeline();
+      return;
+    }
+    
+    // Cancel any pending drag if user just clicked without dragging
+    if (draggingClip && !isDraggingClip) {
+      draggingClip = null;
+      dragOffsetX = 0;
     }
     
     if (isTrimming && trimmingClip) {
@@ -570,6 +692,38 @@
         trimmingClip.endTime = Math.max(minEndTime, Math.min(maxEndTime, newTime));
         console.log(`Right trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
       }
+      
+      drawTimeline();
+      return;
+    }
+    
+    // Handle clip dragging for reordering
+    if (draggingClip && !isTrimming && !isDraggingClip) {
+      // Check if user has moved mouse enough to start dragging
+      const wrapperRect = wrapperElement.getBoundingClientRect();
+      const scrollLeft = wrapperElement.scrollLeft;
+      const x = e.clientX - wrapperRect.left + scrollLeft;
+      const dragDistance = Math.abs(x - dragStartX);
+      
+      if (dragDistance > 5) {
+        // Start dragging
+        isDraggingClip = true;
+        dragStartTime = draggingClip.startTime;
+        if (overlayElement) {
+          overlayElement.style.cursor = "grabbing";
+        }
+        console.log(`Started dragging clip "${draggingClip.name}"`);
+      }
+    }
+    
+    if (isDraggingClip && draggingClip) {
+      const wrapperRect = wrapperElement.getBoundingClientRect();
+      const scrollLeft = wrapperElement.scrollLeft;
+      const x = e.clientX - wrapperRect.left + scrollLeft;
+      
+      // Calculate the new position
+      const newX = x - timeToX(dragStartTime);
+      dragOffsetX = newX;
       
       drawTimeline();
       return;
