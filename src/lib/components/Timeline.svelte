@@ -71,6 +71,7 @@
   let dragStartTime = $state(0);
   let dragOffsetX = $state(0);
   let previewClip = $state<TimelineClip | null>(null);
+  let snapPosition = $state<number | null>(null);
   
   // Scrubbing state
   let isDraggingScrubber = $state(false);
@@ -88,11 +89,8 @@
   // Use a fixed base zoom level - don't auto-fit to window size
   // This ensures the timeline is always scrollable
   const BASE_PIXELS_PER_SECOND = 30; // Show 30 seconds per 900px
-  const PIXELS_PER_SECOND = $derived(
-    totalDuration > 0 
-      ? BASE_PIXELS_PER_SECOND
-      : BASE_PIXELS_PER_SECOND
-  );
+  let pixelsPerSecond = $state(BASE_PIXELS_PER_SECOND);
+  const PIXELS_PER_SECOND = $derived(pixelsPerSecond);
 
   const timelineWidth = $derived(totalDuration * PIXELS_PER_SECOND);
   const contentWidth = $derived(Math.max(visibleWidth, timelineWidth, MIN_PIXELS_PER_SECOND * 10));
@@ -255,6 +253,19 @@
       ctx.beginPath();
       ctx.arc(scrubberX, HEADER_HEIGHT + TRACK_HEIGHT / 2, 8, 0, Math.PI * 2);
       ctx.fill();
+    }
+    
+    // Draw snap indicator line when dragging
+    if (snapPosition !== null && isDraggingClip) {
+      const snapX = timeToX(snapPosition);
+      ctx.strokeStyle = "#4a9eff";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(snapX, HEADER_HEIGHT);
+      ctx.lineTo(snapX, HEADER_HEIGHT + TRACK_HEIGHT);
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset line dash
     }
   }
 
@@ -490,10 +501,45 @@
   }
 
   function handleWheel(e: WheelEvent) {
-    // Allow scrolling to pass through to the wrapper
     if (!wrapperElement) return;
     
-    // Check if we should handle horizontal scrolling
+    // Check for zoom modifier (Cmd on Mac, Ctrl on Windows/Linux)
+    const isZoomModifier = e.metaKey || e.ctrlKey;
+    
+    if (isZoomModifier) {
+      e.preventDefault();
+      
+      // Get mouse position relative to the wrapper
+      const rect = wrapperElement.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const timeUnderMouse = xToTime(mouseX + wrapperElement.scrollLeft);
+      
+      // Calculate zoom factor
+      const zoomFactor = 1.1;
+      const zoomDelta = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
+      
+      // Calculate new pixels per second
+      const newPixelsPerSecond = pixelsPerSecond * zoomDelta;
+      
+      // Clamp to min/max bounds
+      const clampedPixelsPerSecond = Math.max(MIN_PIXELS_PER_SECOND, Math.min(MAX_PIXELS_PER_SECOND, newPixelsPerSecond));
+      
+      // Only update if within bounds
+      if (clampedPixelsPerSecond !== pixelsPerSecond) {
+        pixelsPerSecond = clampedPixelsPerSecond;
+        
+        // Calculate new scroll position to keep the same time under the cursor
+        const newScrollLeft = timeToX(timeUnderMouse) - mouseX;
+        wrapperElement.scrollLeft = Math.max(0, newScrollLeft);
+        
+        // Redraw timeline
+        drawTimeline();
+      }
+      
+      return;
+    }
+    
+    // Handle horizontal scrolling
     if (e.deltaX !== 0 || e.shiftKey) {
       e.preventDefault();
       wrapperElement.scrollLeft += e.deltaX;
@@ -603,6 +649,7 @@
       isDraggingClip = false;
       draggingClip = null;
       dragOffsetX = 0;
+      snapPosition = null;
       if (overlayElement) {
         overlayElement.style.cursor = "default";
       }
@@ -614,6 +661,7 @@
     if (draggingClip && !isDraggingClip) {
       draggingClip = null;
       dragOffsetX = 0;
+      snapPosition = null;
     }
     
     if (isTrimming && trimmingClip) {
@@ -709,6 +757,7 @@
         // Start dragging
         isDraggingClip = true;
         dragStartTime = draggingClip.startTime;
+        snapPosition = null; // Reset snap position
         if (overlayElement) {
           overlayElement.style.cursor = "grabbing";
         }
@@ -721,9 +770,41 @@
       const scrollLeft = wrapperElement.scrollLeft;
       const x = e.clientX - wrapperRect.left + scrollLeft;
       
-      // Calculate the new position
-      const newX = x - timeToX(dragStartTime);
-      dragOffsetX = newX;
+      // Calculate the new time position
+      const newTime = dragStartTime + xToTime(x - dragStartX);
+      const clipDuration = draggingClip.endTime - draggingClip.startTime;
+      
+      // Find nearest snap point (start of timeline or after each clip)
+      const clipsWithoutDragged = clips.filter(c => c.id !== draggingClip!.id);
+      let snapTime = 0;
+      let minDistance = Math.abs(newTime);
+      
+      // Check distance to timeline start
+      if (Math.abs(newTime) < minDistance) {
+        minDistance = Math.abs(newTime);
+        snapTime = 0;
+      }
+      
+      // Check distance to snap points (after each other clip)
+      for (const clip of clipsWithoutDragged) {
+        const snapPoint = clip.endTime;
+        const distance = Math.abs(newTime - snapPoint);
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          snapTime = snapPoint;
+        }
+      }
+      
+      // Only snap if within reasonable distance (50px = ~1.67s at 30px/s)
+      const snapThreshold = 50 / PIXELS_PER_SECOND;
+      if (minDistance < snapThreshold) {
+        snapPosition = snapTime;
+        dragOffsetX = timeToX(snapTime) - timeToX(dragStartTime);
+      } else {
+        snapPosition = null;
+        dragOffsetX = x - timeToX(dragStartTime);
+      }
       
       drawTimeline();
       return;
@@ -876,6 +957,7 @@
     ondragenter={handleDragOver}
     ondragleave={handleDragLeave}
     ondrop={handleDrop}
+    onwheel={handleWheel}
   >
     {#if isDraggingOver}
       <div class="drop-overlay"></div>
