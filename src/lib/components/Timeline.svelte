@@ -502,7 +502,7 @@
         trimmingClip.startTime = Math.max(minStartTime, Math.min(maxStartTime, trimmingClip.startTime));
       } else if (trimHandle === 'right') {
         const minEndTime = trimmingClip.startTime + MIN_CLIP_DURATION;
-        const maxEndTime = totalDuration;
+        const maxEndTime = trimmingClip.startTime + trimmingClip.duration;
         trimmingClip.endTime = Math.max(minEndTime, Math.min(maxEndTime, trimmingClip.endTime));
       }
       
@@ -564,8 +564,10 @@
         trimmingClip.startTime = Math.max(0, Math.min(trimmingClip.endTime - 0.1, newTime));
         console.log(`Left trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
       } else if (trimHandle === 'right') {
-        // Allow free bidirectional movement - only constrain to absolute timeline boundaries
-        trimmingClip.endTime = Math.min(totalDuration, Math.max(trimmingClip.startTime + 0.1, newTime));
+        // Allow free bidirectional movement - constrain to minimum duration and clip's source duration
+        const minEndTime = trimmingClip.startTime + 0.1;
+        const maxEndTime = trimmingClip.startTime + trimmingClip.duration;
+        trimmingClip.endTime = Math.max(minEndTime, Math.min(maxEndTime, newTime));
         console.log(`Right trim: startTime=${trimmingClip.startTime.toFixed(2)}, endTime=${trimmingClip.endTime.toFixed(2)}`);
       }
       
