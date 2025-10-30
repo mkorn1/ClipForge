@@ -26,9 +26,11 @@
   // Recording state
   let isRecording = $state(false);
   let recordingStream = $state<MediaStream | null>(null);
+  let recordingWebcamStream = $state<MediaStream | null>(null); // Separate webcam stream for PiP mode
   let recordingProcessId = $state<number | null>(null);
   let recordingTime = $state(0);
-  let recordingMode = $state<'screen' | 'webcam'>('screen');
+  // Update recordingMode type to include 'pip'
+  let recordingMode = $state<'screen' | 'webcam' | 'pip'>('screen');
 
   function getMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
@@ -234,7 +236,6 @@
       // Clear selected clip so preview shows recording
       selectedClip = null;
 
-      // Try to use getUserMedia/getDisplayMedia for live preview if available
       let stream: MediaStream | null = null;
       let hasLivePreview = false;
 
@@ -266,6 +267,57 @@
         } else {
           console.warn("getUserMedia API not available, using backend-only recording");
           stream = null;
+          hasLivePreview = false;
+        }
+      } else if (recordingMode === 'pip') {
+        // PiP mode: Get both screen and webcam streams for preview
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && navigator.mediaDevices.getUserMedia) {
+          try {
+            // Get screen stream
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: false,
+            });
+            
+            // Get webcam stream
+            const webcamStream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+              audio: false,
+            });
+
+            // Store streams separately for PiP compositing
+            stream = screenStream;
+            recordingStream = screenStream;
+            recordingWebcamStream = webcamStream;
+            hasLivePreview = true;
+
+            // Handle stream ending
+            screenStream.getVideoTracks()[0].addEventListener("ended", () => {
+              if (isRecording) {
+                handleRecordStop();
+              }
+            });
+            
+            webcamStream.getVideoTracks()[0].addEventListener("ended", () => {
+              if (isRecording) {
+                handleRecordStop();
+              }
+            });
+          } catch (previewError) {
+            console.warn("PiP preview not available, proceeding with backend recording only:", previewError);
+            stream = null;
+            recordingStream = null;
+            recordingWebcamStream = null;
+            hasLivePreview = false;
+          }
+        } else {
+          console.warn("Required APIs not available for PiP, using backend-only recording");
+          stream = null;
+          recordingStream = null;
+          recordingWebcamStream = null;
           hasLivePreview = false;
         }
       } else {
@@ -301,20 +353,34 @@
       }
 
       // Start backend recording based on mode
-      const command = recordingMode === 'webcam' ? 'start_webcam_recording' : 'start_screen_recording';
-      const result = await invoke<{ process_id: number; output_path: string }>(
-        command,
-        recordingMode === 'webcam' 
-          ? { outputPath: null, deviceIndex: null }  // Can specify device index if needed
-          : { outputPath: null }
-      );
+      let result: { process_id: number; output_path: string };
+      
+      if (recordingMode === 'pip') {
+        result = await invoke<{ process_id: number; output_path: string }>(
+          'start_screen_webcam_recording',
+          {
+            outputPath: null,
+            webcamDeviceIndex: null,
+            pipPosition: 'bottom-right',  // Can be made configurable
+            pipSize: null,
+          }
+        );
+      } else {
+        const command = recordingMode === 'webcam' ? 'start_webcam_recording' : 'start_screen_recording';
+        result = await invoke<{ process_id: number; output_path: string }>(
+          command,
+          recordingMode === 'webcam' 
+            ? { outputPath: null, deviceIndex: null }
+            : { outputPath: null }
+        );
+      }
 
       recordingProcessId = result.process_id;
       isRecording = true;
 
-      // If no live preview, show a placeholder message
       if (!hasLivePreview) {
-        recordingStream = null; // Clear stream since we don't have live preview
+        recordingStream = null;
+        recordingWebcamStream = null;
       }
     } catch (error) {
       console.error("Error starting recording:", error);
@@ -324,16 +390,28 @@
         recordingStream.getTracks().forEach(track => track.stop());
         recordingStream = null;
       }
+      if (recordingWebcamStream) {
+        recordingWebcamStream.getTracks().forEach(track => track.stop());
+        recordingWebcamStream = null;
+      }
       isRecording = false;
       recordingProcessId = null;
 
       // Show user-friendly error message
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       if (errorMessage.includes("NotAllowedError") || errorMessage.includes("Permission")) {
-        const permissionType = recordingMode === 'webcam' ? 'camera' : 'screen recording';
+        const permissionType = recordingMode === 'webcam' 
+          ? 'camera' 
+          : recordingMode === 'pip' 
+            ? 'screen recording and camera' 
+            : 'screen recording';
         alert(`${permissionType} permission was denied. Please enable ${permissionType} in System Preferences > Security & Privacy > Privacy.`);
       } else if (errorMessage.includes("NotFoundError") || errorMessage.includes("not found")) {
-        const deviceType = recordingMode === 'webcam' ? 'webcam' : 'screen';
+        const deviceType = recordingMode === 'webcam' 
+          ? 'webcam' 
+          : recordingMode === 'pip' 
+            ? 'screen or webcam' 
+            : 'screen';
         alert(`Could not access ${deviceType}. Please ensure no other application is blocking ${deviceType} access.`);
       } else {
         alert(`Failed to start recording: ${errorMessage}`);
@@ -343,10 +421,14 @@
 
   async function handleRecordStop() {
     try {
-      // Stop frontend stream
+      // Stop frontend streams
       if (recordingStream) {
         recordingStream.getTracks().forEach(track => track.stop());
         recordingStream = null;
+      }
+      if (recordingWebcamStream) {
+        recordingWebcamStream.getTracks().forEach(track => track.stop());
+        recordingWebcamStream = null;
       }
 
       // Stop backend recording
@@ -436,14 +518,18 @@
       </div>
       {#if isRecording}
         {#if recordingStream}
-          <RecordingPreview stream={recordingStream} />
+          <RecordingPreview 
+            stream={recordingStream} 
+            webcamStream={recordingMode === 'pip' ? recordingWebcamStream : null}
+            pipPosition="bottom-right"
+          />
         {:else}
           <div class="recording-placeholder">
             <div class="recording-status">
               <span class="recording-indicator"></span>
-              <h3>Recording {recordingMode === 'webcam' ? 'Webcam' : 'Screen'}...</h3>
+              <h3>Recording {recordingMode === 'webcam' ? 'Webcam' : recordingMode === 'pip' ? 'Screen + Webcam' : 'Screen'}...</h3>
               <p>Recording duration: {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</p>
-              <p class="recording-hint">{recordingMode === 'webcam' ? 'Webcam' : 'Screen'} capture is in progress. Click "Stop Recording" when finished.</p>
+              <p class="recording-hint">{recordingMode === 'webcam' ? 'Webcam' : recordingMode === 'pip' ? 'Screen and webcam' : 'Screen'} capture is in progress. Click "Stop Recording" when finished.</p>
             </div>
           </div>
         {/if}

@@ -10,7 +10,7 @@
   let { 
     isRecording = $bindable(false), 
     recordingTime = $bindable(0),
-    recordingMode = $bindable<'screen' | 'webcam'>('screen'),
+    recordingMode = $bindable<'screen' | 'webcam' | 'pip'>('screen'),
     onRecordStart,
     onRecordStop
   }: Props = $props();
@@ -49,7 +49,7 @@
     }
   });
 
-  function handleRecordClick(mode: 'screen' | 'webcam') {
+  function handleRecordClick(mode: 'screen' | 'webcam' | 'pip') {
     if (isRecording) {
       if (onRecordStop) {
         onRecordStop();
@@ -98,6 +98,21 @@
       <span class="timer">{formatTime(recordingTime)}</span>
     {:else}
       <span class="button-text">📹 Record Webcam</span>
+    {/if}
+  </button>
+  <button 
+    class="record-button" 
+    class:recording={isRecording && recordingMode === 'pip'}
+    onclick={() => handleRecordClick('pip')}
+    disabled={isRecording === undefined || (isRecording && recordingMode !== 'pip')}
+    aria-label={isRecording && recordingMode === 'pip' ? "Stop recording" : "Start picture-in-picture recording"}
+  >
+    {#if isRecording && recordingMode === 'pip'}
+      <span class="record-indicator"></span>
+      <span class="button-text">⏹ Stop Recording</span>
+      <span class="timer">{formatTime(recordingTime)}</span>
+    {:else}
+      <span class="button-text">🎬 Record PiP</span>
     {/if}
   </button>
 </div>

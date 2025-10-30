@@ -418,6 +418,150 @@ fn check_screen_recording_permission() -> Result<PermissionStatus, String> {
     }
 }
 
+/// Start simultaneous screen + webcam recording with picture-in-picture overlay
+/// Returns a process ID that can be used to stop the recording
+#[tauri::command]
+fn start_screen_webcam_recording(
+    output_path: Option<String>,
+    webcam_device_index: Option<u32>,
+    pip_position: Option<String>, // "bottom-right", "bottom-left", "top-right", "top-left"
+    pip_size: Option<String>,      // e.g., "320:240" or "25%"
+) -> Result<RecordingResult, String> {
+    // Generate output path if not provided
+    let output = if let Some(path) = output_path {
+        path
+    } else {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let temp_dir = std::env::temp_dir();
+        temp_dir
+            .join(format!("clipforge-pip-{}.mp4", timestamp))
+            .to_str()
+            .ok_or("Failed to create temp file path")?
+            .to_string()
+    };
+
+    // Check if FFmpeg is available
+    let ffmpeg_check = Command::new("ffmpeg")
+        .arg("-version")
+        .output();
+    
+    match ffmpeg_check {
+        Ok(_) => {},
+        Err(_) => return Err("FFmpeg is not installed or not found in PATH. Please install FFmpeg to use screen recording.".to_string()),
+    }
+
+    // Use device index 0 by default for webcam, or user-specified
+    let webcam_idx = webcam_device_index.unwrap_or(0);
+    let screen_device = "4:";  // Screen capture device
+    let webcam_device = format!("{}:", webcam_idx);
+
+    // Default PiP settings
+    let pip_width = "320";
+    let pip_height = "240";
+    let position = pip_position.as_deref().unwrap_or("bottom-right");
+    
+    // Calculate overlay position based on desired corner
+    let overlay_pos = match position {
+        "bottom-right" => "W-w-10:H-h-10",  // 10px from right and bottom
+        "bottom-left" => "10:H-h-10",       // 10px from left and bottom
+        "top-right" => "W-w-10:10",         // 10px from right and top
+        "top-left" => "10:10",              // 10px from left and top
+        _ => "W-w-10:H-h-10",               // Default to bottom-right
+    };
+
+    // Construct FFmpeg command with filter_complex for PiP overlay
+    // Input 0: Screen capture (device 4)
+    // Input 1: Webcam (device 0 or specified)
+    // Filter: Scale webcam and overlay on screen
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-f")
+        .arg("avfoundation")
+        .arg("-capture_cursor")
+        .arg("1")  // Capture cursor on screen
+        .arg("-framerate")
+        .arg("30")
+        .arg("-i")
+        .arg(screen_device)  // Input 0: Screen
+        .arg("-f")
+        .arg("avfoundation")
+        .arg("-framerate")
+        .arg("30")
+        .arg("-video_size")
+        .arg("1280x720")  // Webcam resolution (will be scaled down)
+        .arg("-i")
+        .arg(&webcam_device)  // Input 1: Webcam
+        .arg("-filter_complex")
+        .arg(format!(
+            "[1:v]scale={}:{}[webcam];[0:v][webcam]overlay={}[v]",
+            pip_width, pip_height, overlay_pos
+        ))
+        .arg("-map")
+        .arg("[v]")  // Map the filtered output
+        .arg("-r")
+        .arg("30")  // Output framerate
+        .arg("-c:v")
+        .arg("libx264")  // Video codec
+        .arg("-preset")
+        .arg("fast")  // Encoding speed
+        .arg("-crf")
+        .arg("23")  // Quality
+        .arg("-pix_fmt")
+        .arg("yuv420p")  // Pixel format for compatibility
+        .arg("-y")  // Overwrite output file
+        .arg(&output)
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null());
+
+    // Spawn the FFmpeg process
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Failed to start FFmpeg process: {}. Make sure FFmpeg is installed and available in PATH.", e))?;
+
+    // Give FFmpeg a moment to initialize
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    
+    // Check if process immediately crashed
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let error_msg = if let Some(mut stderr) = child.stderr.take() {
+                use std::io::Read;
+                let mut error_output = String::new();
+                let _ = stderr.read_to_string(&mut error_output);
+                if !error_output.is_empty() {
+                    format!("FFmpeg exited immediately with status {:?}. Error output: {}", status, error_output)
+                } else {
+                    format!("FFmpeg exited immediately with status {:?}", status)
+                }
+            } else {
+                format!("FFmpeg exited immediately with status {:?}", status)
+            };
+            return Err(error_msg);
+        }
+        Ok(None) => {
+            // Process is still running, good!
+        }
+        Err(e) => {
+            return Err(format!("Failed to check FFmpeg process status: {}", e));
+        }
+    }
+
+    // Generate a unique process ID
+    let process_id = child.id();
+
+    // Store the process handle and output path
+    let mut processes = RECORDING_PROCESSES.lock()
+        .map_err(|e| format!("Failed to lock recording processes: {}", e))?;
+    
+    processes.insert(process_id, (child, output.clone()));
+
+    Ok(RecordingResult {
+        process_id,
+        output_path: output,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -429,6 +573,7 @@ pub fn run() {
             export_video,
             start_screen_recording,
             start_webcam_recording,
+            start_screen_webcam_recording,  // Add this
             stop_screen_recording,
             check_screen_recording_permission
         ])
