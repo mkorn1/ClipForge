@@ -28,6 +28,7 @@
   let recordingStream = $state<MediaStream | null>(null);
   let recordingProcessId = $state<number | null>(null);
   let recordingTime = $state(0);
+  let recordingMode = $state<'screen' | 'webcam'>('screen');
 
   function getMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
@@ -233,43 +234,79 @@
       // Clear selected clip so preview shows recording
       selectedClip = null;
 
-      // Try to use getDisplayMedia for live preview if available
+      // Try to use getUserMedia/getDisplayMedia for live preview if available
       let stream: MediaStream | null = null;
       let hasLivePreview = false;
 
-      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-        try {
-          // Request screen capture for live preview
-          stream = await navigator.mediaDevices.getDisplayMedia({
-            video: true,
-            audio: false,
-          });
-          recordingStream = stream;
-          hasLivePreview = true;
+      if (recordingMode === 'webcam') {
+        // Webcam recording - use getUserMedia
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+              audio: false,
+            });
+            recordingStream = stream;
+            hasLivePreview = true;
 
-          // Handle stream ending (e.g., user stops from browser dialog)
-          stream.getVideoTracks()[0].addEventListener("ended", () => {
-            if (isRecording) {
-              handleRecordStop();
-            }
-          });
-        } catch (previewError) {
-          console.warn("Live preview not available, proceeding with backend recording only:", previewError);
-          // Continue with backend-only recording if preview fails
+            // Handle stream ending
+            stream.getVideoTracks()[0].addEventListener("ended", () => {
+              if (isRecording) {
+                handleRecordStop();
+              }
+            });
+          } catch (previewError) {
+            console.warn("Webcam preview not available, proceeding with backend recording only:", previewError);
+            stream = null;
+            hasLivePreview = false;
+          }
+        } else {
+          console.warn("getUserMedia API not available, using backend-only recording");
           stream = null;
           hasLivePreview = false;
         }
       } else {
-        console.warn("getDisplayMedia API not available, using backend-only recording");
-        // Continue with backend-only recording
-        stream = null;
-        hasLivePreview = false;
+        // Screen recording - use getDisplayMedia
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          try {
+            // Request screen capture for live preview
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: false,
+            });
+            recordingStream = stream;
+            hasLivePreview = true;
+
+            // Handle stream ending (e.g., user stops from browser dialog)
+            stream.getVideoTracks()[0].addEventListener("ended", () => {
+              if (isRecording) {
+                handleRecordStop();
+              }
+            });
+          } catch (previewError) {
+            console.warn("Live preview not available, proceeding with backend recording only:", previewError);
+            // Continue with backend-only recording if preview fails
+            stream = null;
+            hasLivePreview = false;
+          }
+        } else {
+          console.warn("getDisplayMedia API not available, using backend-only recording");
+          // Continue with backend-only recording
+          stream = null;
+          hasLivePreview = false;
+        }
       }
 
-      // Start backend recording (backend will generate temp file path)
+      // Start backend recording based on mode
+      const command = recordingMode === 'webcam' ? 'start_webcam_recording' : 'start_screen_recording';
       const result = await invoke<{ process_id: number; output_path: string }>(
-        "start_screen_recording",
-        { outputPath: null }
+        command,
+        recordingMode === 'webcam' 
+          ? { outputPath: null, deviceIndex: null }  // Can specify device index if needed
+          : { outputPath: null }
       );
 
       recordingProcessId = result.process_id;
@@ -293,9 +330,11 @@
       // Show user-friendly error message
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       if (errorMessage.includes("NotAllowedError") || errorMessage.includes("Permission")) {
-        alert("Screen recording permission was denied. Please enable screen recording in System Preferences > Security & Privacy > Privacy > Screen Recording.");
+        const permissionType = recordingMode === 'webcam' ? 'camera' : 'screen recording';
+        alert(`${permissionType} permission was denied. Please enable ${permissionType} in System Preferences > Security & Privacy > Privacy.`);
       } else if (errorMessage.includes("NotFoundError") || errorMessage.includes("not found")) {
-        alert("Could not access screen. Please ensure no other application is blocking screen recording.");
+        const deviceType = recordingMode === 'webcam' ? 'webcam' : 'screen';
+        alert(`Could not access ${deviceType}. Please ensure no other application is blocking ${deviceType} access.`);
       } else {
         alert(`Failed to start recording: ${errorMessage}`);
       }
@@ -385,7 +424,11 @@
           <RecordButton 
             isRecording={isRecording}
             recordingTime={recordingTime}
-            onRecordStart={handleRecordStart}
+            recordingMode={recordingMode}
+            onRecordStart={(mode) => {
+              recordingMode = mode;
+              handleRecordStart();
+            }}
             onRecordStop={handleRecordStop}
           />
           <ImportButton onImport={handleImport} />
@@ -398,9 +441,9 @@
           <div class="recording-placeholder">
             <div class="recording-status">
               <span class="recording-indicator"></span>
-              <h3>Recording Screen...</h3>
+              <h3>Recording {recordingMode === 'webcam' ? 'Webcam' : 'Screen'}...</h3>
               <p>Recording duration: {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</p>
-              <p class="recording-hint">Screen capture is in progress. Click "Stop Recording" when finished.</p>
+              <p class="recording-hint">{recordingMode === 'webcam' ? 'Webcam' : 'Screen'} capture is in progress. Click "Stop Recording" when finished.</p>
             </div>
           </div>
         {/if}

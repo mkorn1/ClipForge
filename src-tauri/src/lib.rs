@@ -185,6 +185,116 @@ fn start_screen_recording(output_path: Option<String>) -> Result<RecordingResult
     })
 }
 
+/// Start webcam recording using FFmpeg
+/// Returns a process ID that can be used to stop the recording
+#[tauri::command]
+fn start_webcam_recording(output_path: Option<String>, device_index: Option<u32>) -> Result<RecordingResult, String> {
+    // Generate output path if not provided
+    let output = if let Some(path) = output_path {
+        path
+    } else {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let temp_dir = std::env::temp_dir();
+        temp_dir
+            .join(format!("clipforge-webcam-{}.mp4", timestamp))
+            .to_str()
+            .ok_or("Failed to create temp file path")?
+            .to_string()
+    };
+
+    // Check if FFmpeg is available
+    let ffmpeg_check = Command::new("ffmpeg")
+        .arg("-version")
+        .output();
+    
+    match ffmpeg_check {
+        Ok(_) => {},
+        Err(_) => return Err("FFmpeg is not installed or not found in PATH. Please install FFmpeg to use webcam recording.".to_string()),
+    }
+
+    // Use device index 0 by default (first webcam), or user-specified
+    let device_idx = device_index.unwrap_or(0);
+    let device_string = format!("{}:", device_idx);
+
+    // Construct FFmpeg command for macOS using avfoundation
+    // Format: ffmpeg -f avfoundation -i "0:" -r 30 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p output.mp4
+    // "0:" means video device 0 (first webcam), no audio device
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-f")
+        .arg("avfoundation")
+        .arg("-framerate")
+        .arg("30")  // Input framerate
+        .arg("-video_size")
+        .arg("1280x720")  // Common webcam resolution, can be made configurable
+        .arg("-i")
+        .arg(&device_string)  // Webcam device index
+        .arg("-r")
+        .arg("30")  // Output framerate
+        .arg("-c:v")
+        .arg("libx264")  // Video codec
+        .arg("-preset")
+        .arg("fast")  // Encoding speed
+        .arg("-crf")
+        .arg("23")  // Quality (lower = better, 18-28 is reasonable range)
+        .arg("-pix_fmt")
+        .arg("yuv420p")  // Pixel format for compatibility
+        .arg("-y")  // Overwrite output file
+        .arg(&output)
+        // Capture stderr to log errors for debugging
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null());
+
+    // Spawn the FFmpeg process
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Failed to start FFmpeg process: {}. Make sure FFmpeg is installed and available in PATH.", e))?;
+
+    // Give FFmpeg a moment to initialize and check if it's still running
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    
+    // Check if process immediately crashed
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            // Process already exited - try to read stderr for error info
+            let error_msg = if let Some(mut stderr) = child.stderr.take() {
+                use std::io::Read;
+                let mut error_output = String::new();
+                let _ = stderr.read_to_string(&mut error_output);
+                if !error_output.is_empty() {
+                    format!("FFmpeg exited immediately with status {:?}. Error output: {}", status, error_output)
+                } else {
+                    format!("FFmpeg exited immediately with status {:?}", status)
+                }
+            } else {
+                format!("FFmpeg exited immediately with status {:?}", status)
+            };
+            return Err(error_msg);
+        }
+        Ok(None) => {
+            // Process is still running, good!
+        }
+        Err(e) => {
+            return Err(format!("Failed to check FFmpeg process status: {}", e));
+        }
+    }
+
+    // Generate a unique process ID
+    let process_id = child.id();
+
+    // Store the process handle and output path
+    let mut processes = RECORDING_PROCESSES.lock()
+        .map_err(|e| format!("Failed to lock recording processes: {}", e))?;
+    
+    processes.insert(process_id, (child, output.clone()));
+
+    Ok(RecordingResult {
+        process_id,
+        output_path: output,
+    })
+}
+
 /// Stop a screen recording process
 /// Returns the path to the saved recording file
 #[tauri::command]
@@ -318,6 +428,7 @@ pub fn run() {
             greet, 
             export_video,
             start_screen_recording,
+            start_webcam_recording,
             stop_screen_recording,
             check_screen_recording_permission
         ])

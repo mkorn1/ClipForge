@@ -2,15 +2,17 @@
   interface Props {
     isRecording?: boolean;
     recordingTime?: number;
-    onRecordStart?: () => void;
+    recordingMode?: 'screen' | 'webcam';
+    onRecordStart?: (mode: 'screen' | 'webcam') => void;
     onRecordStop?: () => void;
   }
 
   let { 
     isRecording = $bindable(false), 
     recordingTime = $bindable(0),
+    recordingMode = $bindable<'screen' | 'webcam'>('screen'),
     onRecordStart,
-    onRecordStop 
+    onRecordStop
   }: Props = $props();
 
   let timerInterval: ReturnType<typeof setInterval> | null = $state(null);
@@ -47,14 +49,14 @@
     }
   });
 
-  function handleClick() {
+  function handleRecordClick(mode: 'screen' | 'webcam') {
     if (isRecording) {
       if (onRecordStop) {
         onRecordStop();
       }
     } else {
       if (onRecordStart) {
-        onRecordStart();
+        onRecordStart(mode);
       }
     }
   }
@@ -70,12 +72,12 @@
 <div class="record-button-container">
   <button 
     class="record-button" 
-    class:recording={isRecording}
-    onclick={handleClick}
-    disabled={isRecording === undefined}
-    aria-label={isRecording ? "Stop recording" : "Start recording"}
+    class:recording={isRecording && recordingMode === 'screen'}
+    onclick={() => handleRecordClick('screen')}
+    disabled={isRecording === undefined || (isRecording && recordingMode !== 'screen')}
+    aria-label={isRecording && recordingMode === 'screen' ? "Stop recording" : "Start screen recording"}
   >
-    {#if isRecording}
+    {#if isRecording && recordingMode === 'screen'}
       <span class="record-indicator"></span>
       <span class="button-text">⏹ Stop Recording</span>
       <span class="timer">{formatTime(recordingTime)}</span>
@@ -83,11 +85,28 @@
       <span class="button-text">🎥 Record Screen</span>
     {/if}
   </button>
+  <button 
+    class="record-button" 
+    class:recording={isRecording && recordingMode === 'webcam'}
+    onclick={() => handleRecordClick('webcam')}
+    disabled={isRecording === undefined || (isRecording && recordingMode !== 'webcam')}
+    aria-label={isRecording && recordingMode === 'webcam' ? "Stop recording" : "Start webcam recording"}
+  >
+    {#if isRecording && recordingMode === 'webcam'}
+      <span class="record-indicator"></span>
+      <span class="button-text">⏹ Stop Recording</span>
+      <span class="timer">{formatTime(recordingTime)}</span>
+    {:else}
+      <span class="button-text">📹 Record Webcam</span>
+    {/if}
+  </button>
 </div>
 
 <style>
   .record-button-container {
-    display: inline-block;
+    display: inline-flex;
+    gap: 0.5rem;
+    align-items: center;
   }
 
   .record-button {
@@ -166,6 +185,7 @@
     min-width: 40px;
     text-align: center;
   }
+
 
   @media (prefers-color-scheme: dark) {
     .record-button {
