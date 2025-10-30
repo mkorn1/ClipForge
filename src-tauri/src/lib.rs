@@ -44,6 +44,17 @@ pub struct PermissionStatus {
     pub message: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AudioDevice {
+    pub index: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AudioDeviceList {
+    pub devices: Vec<AudioDevice>,
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -81,7 +92,7 @@ fn export_video(source_path: String, destination_path: String) -> Result<ExportR
 /// Start screen recording using FFmpeg
 /// Returns a process ID that can be used to stop the recording
 #[tauri::command]
-fn start_screen_recording(output_path: Option<String>) -> Result<RecordingResult, String> {
+fn start_screen_recording(output_path: Option<String>, audio_device_index: Option<u32>) -> Result<RecordingResult, String> {
     // Generate output path if not provided
     let output = if let Some(path) = output_path {
         path
@@ -110,8 +121,17 @@ fn start_screen_recording(output_path: Option<String>) -> Result<RecordingResult
 
     // Construct FFmpeg command for macOS using avfoundation
     // Screen capture devices start at index 4 (Capture screen 0), 5 (Capture screen 1), etc.
-    // Format: ffmpeg -f avfoundation -i "4:" -r 30 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p output.mp4
-    // "4:" means screen capture device 4 (first screen), no audio device
+    // Format: ffmpeg -f avfoundation -i "4:0" -r 30 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 output.mp4
+    // "4:0" means screen capture device 4 (first screen), audio device 0 (first microphone)
+    // "4:" means screen capture device 4, no audio device
+    
+    // Build input device string: "video_device:audio_device" or "video_device:" if no audio
+    let input_device = if let Some(audio_idx) = audio_device_index {
+        format!("4:{}", audio_idx)
+    } else {
+        "4:".to_string()
+    };
+    
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-f")
         .arg("avfoundation")
@@ -120,8 +140,21 @@ fn start_screen_recording(output_path: Option<String>) -> Result<RecordingResult
         .arg("-framerate")
         .arg("30")  // Input framerate
         .arg("-i")
-        .arg("4:")  // Screen capture device 4 (Capture screen 0), no audio
-        .arg("-r")
+        .arg(&input_device);  // Screen capture device 4 (Capture screen 0), optional audio device
+    
+    // Add audio encoding parameters if audio device is provided
+    if audio_device_index.is_some() {
+        cmd.arg("-c:a")
+            .arg("aac")  // Audio codec
+            .arg("-b:a")
+            .arg("192k")  // Audio bitrate (192 kbps)
+            .arg("-ar")
+            .arg("48000")  // Sample rate (48 kHz)
+            .arg("-ac")
+            .arg("2");  // Stereo (2 channels)
+    }
+    
+    cmd.arg("-r")
         .arg("30")  // Output framerate
         .arg("-c:v")
         .arg("libx264")  // Video codec
@@ -188,7 +221,7 @@ fn start_screen_recording(output_path: Option<String>) -> Result<RecordingResult
 /// Start webcam recording using FFmpeg
 /// Returns a process ID that can be used to stop the recording
 #[tauri::command]
-fn start_webcam_recording(output_path: Option<String>, device_index: Option<u32>) -> Result<RecordingResult, String> {
+fn start_webcam_recording(output_path: Option<String>, device_index: Option<u32>, audio_device_index: Option<u32>) -> Result<RecordingResult, String> {
     // Generate output path if not provided
     let output = if let Some(path) = output_path {
         path
@@ -217,11 +250,18 @@ fn start_webcam_recording(output_path: Option<String>, device_index: Option<u32>
 
     // Use device index 0 by default (first webcam), or user-specified
     let device_idx = device_index.unwrap_or(0);
-    let device_string = format!("{}:", device_idx);
+    
+    // Build input device string: "video_device:audio_device" or "video_device:" if no audio
+    let device_string = if let Some(audio_idx) = audio_device_index {
+        format!("{}:{}", device_idx, audio_idx)
+    } else {
+        format!("{}:", device_idx)
+    };
 
     // Construct FFmpeg command for macOS using avfoundation
-    // Format: ffmpeg -f avfoundation -i "0:" -r 30 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p output.mp4
-    // "0:" means video device 0 (first webcam), no audio device
+    // Format: ffmpeg -f avfoundation -i "0:0" -r 30 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 output.mp4
+    // "0:0" means video device 0 (first webcam), audio device 0 (first microphone)
+    // "0:" means video device 0, no audio device
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-f")
         .arg("avfoundation")
@@ -230,8 +270,21 @@ fn start_webcam_recording(output_path: Option<String>, device_index: Option<u32>
         .arg("-video_size")
         .arg("1280x720")  // Common webcam resolution, can be made configurable
         .arg("-i")
-        .arg(&device_string)  // Webcam device index
-        .arg("-r")
+        .arg(&device_string);  // Webcam device index, optional audio device
+    
+    // Add audio encoding parameters if audio device is provided
+    if audio_device_index.is_some() {
+        cmd.arg("-c:a")
+            .arg("aac")  // Audio codec
+            .arg("-b:a")
+            .arg("192k")  // Audio bitrate (192 kbps)
+            .arg("-ar")
+            .arg("48000")  // Sample rate (48 kHz)
+            .arg("-ac")
+            .arg("2");  // Stereo (2 channels)
+    }
+    
+    cmd.arg("-r")
         .arg("30")  // Output framerate
         .arg("-c:v")
         .arg("libx264")  // Video codec
@@ -418,6 +471,110 @@ fn check_screen_recording_permission() -> Result<PermissionStatus, String> {
     }
 }
 
+/// List available audio devices (microphones) using FFmpeg
+#[tauri::command]
+fn list_audio_devices() -> Result<AudioDeviceList, String> {
+    // Check if FFmpeg is available
+    let ffmpeg_check = Command::new("ffmpeg")
+        .arg("-version")
+        .output();
+    
+    match ffmpeg_check {
+        Ok(_) => {},
+        Err(_) => return Err("FFmpeg is not installed or not found in PATH. Please install FFmpeg to list audio devices.".to_string()),
+    }
+
+    // Run FFmpeg to list devices
+    // FFmpeg outputs device list to stderr (not stdout)
+    let output = Command::new("ffmpeg")
+        .arg("-f")
+        .arg("avfoundation")
+        .arg("-list_devices")
+        .arg("true")
+        .arg("-i")
+        .arg("")
+        .output()
+        .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
+
+    // Parse stderr for audio devices
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut devices = Vec::new();
+    
+    // FFmpeg output format for avfoundation:
+    // [AVFoundation indev @ ...] AVFoundation audio devices:
+    // [AVFoundation indev @ ...] [0] MacBook Air Microphone
+    // [AVFoundation indev @ ...] [1] External Microphone
+    // etc.
+    // We look for lines that contain "[AVFoundation indev" and have an index followed by audio device names
+    let mut in_audio_section = false;
+    
+    for line in stderr.lines() {
+        // Check if we're entering the audio devices section
+        if line.contains("AVFoundation audio devices:") {
+            in_audio_section = true;
+            continue;
+        }
+        
+        // Check if we're leaving the audio section (entering video section or other section)
+        if line.contains("AVFoundation video devices:") || (line.contains("[AVFoundation indev") && !in_audio_section && devices.len() > 0) {
+            in_audio_section = false;
+            // Don't break - there might be more sections after video
+        }
+        
+        // Parse audio device lines
+        // Format: [AVFoundation indev @ ...] [INDEX] DEVICE_NAME
+        if in_audio_section && line.contains("[AVFoundation indev") && line.contains('[') {
+            // Find the last bracket pair which contains the index
+            // The format is: [AVFoundation indev @ ...] [INDEX] NAME
+            if let Some(last_open_bracket) = line.rfind('[') {
+                // Check if there's a closing bracket after the last open bracket
+                if let Some(closing_bracket) = line[last_open_bracket..].find(']') {
+                    let index_str = &line[last_open_bracket + 1..last_open_bracket + closing_bracket];
+                    if let Ok(index) = index_str.parse::<u32>() {
+                        // Extract device name (everything after the closing bracket, trimmed)
+                        let name_start = last_open_bracket + closing_bracket + 1;
+                        if name_start < line.len() {
+                            let name = line[name_start..].trim().to_string();
+                            if !name.is_empty() {
+                                devices.push(AudioDevice {
+                                    index,
+                                    name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(AudioDeviceList { devices })
+}
+
+/// Check microphone permission status on macOS
+/// Note: Direct permission checking requires Objective-C/Swift interop, so this is a placeholder
+#[tauri::command]
+fn check_microphone_permission() -> Result<PermissionStatus, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, we can't directly check permissions from Rust without FFI
+        // The actual permission check will happen when FFmpeg tries to access the microphone
+        // For now, return a placeholder that indicates permission should be checked by the frontend
+        Ok(PermissionStatus {
+            has_permission: false, // Assume false, frontend will verify via getUserMedia()
+            message: "Permission status cannot be determined from backend. Frontend will check via getUserMedia() API. Make sure microphone permission is granted in System Preferences > Security & Privacy > Privacy > Microphone.".to_string(),
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PermissionStatus {
+            has_permission: true,
+            message: "Microphone permissions not applicable on this platform".to_string(),
+        })
+    }
+}
+
 /// Start simultaneous screen + webcam recording with picture-in-picture overlay
 /// Returns a process ID that can be used to stop the recording
 #[tauri::command]
@@ -425,7 +582,8 @@ fn start_screen_webcam_recording(
     output_path: Option<String>,
     webcam_device_index: Option<u32>,
     pip_position: Option<String>, // "bottom-right", "bottom-left", "top-right", "top-left"
-    pip_size: Option<String>,      // e.g., "320:240" or "25%"
+    _pip_size: Option<String>,      // e.g., "320:240" or "25%"
+    audio_device_index: Option<u32>,
 ) -> Result<RecordingResult, String> {
     // Generate output path if not provided
     let output = if let Some(path) = output_path {
@@ -455,7 +613,14 @@ fn start_screen_webcam_recording(
 
     // Use device index 0 by default for webcam, or user-specified
     let webcam_idx = webcam_device_index.unwrap_or(0);
-    let screen_device = "4:";  // Screen capture device
+    
+    // Build input device strings with optional audio
+    // Screen capture device: "4:audio_index" or "4:" if no audio
+    let screen_device = if let Some(audio_idx) = audio_device_index {
+        format!("4:{}", audio_idx)
+    } else {
+        "4:".to_string()
+    };
     let webcam_device = format!("{}:", webcam_idx);
 
     // Default PiP settings
@@ -499,8 +664,23 @@ fn start_screen_webcam_recording(
             pip_width, pip_height, overlay_pos
         ))
         .arg("-map")
-        .arg("[v]")  // Map the filtered output
-        .arg("-r")
+        .arg("[v]");  // Map the filtered video output
+    
+    // Map audio from input 0 (screen input with audio) if audio device is provided
+    if audio_device_index.is_some() {
+        cmd.arg("-map")
+            .arg("0:a")  // Map audio from input 0
+            .arg("-c:a")
+            .arg("aac")  // Audio codec
+            .arg("-b:a")
+            .arg("192k")  // Audio bitrate (192 kbps)
+            .arg("-ar")
+            .arg("48000")  // Sample rate (48 kHz)
+            .arg("-ac")
+            .arg("2");  // Stereo (2 channels)
+    }
+    
+    cmd.arg("-r")
         .arg("30")  // Output framerate
         .arg("-c:v")
         .arg("libx264")  // Video codec
@@ -573,9 +753,11 @@ pub fn run() {
             export_video,
             start_screen_recording,
             start_webcam_recording,
-            start_screen_webcam_recording,  // Add this
+            start_screen_webcam_recording,
             stop_screen_recording,
-            check_screen_recording_permission
+            check_screen_recording_permission,
+            list_audio_devices,
+            check_microphone_permission
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

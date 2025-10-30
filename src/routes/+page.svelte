@@ -31,6 +31,11 @@
   let recordingTime = $state(0);
   // Update recordingMode type to include 'pip'
   let recordingMode = $state<'screen' | 'webcam' | 'pip'>('screen');
+  
+  // Audio state
+  let audioEnabled = $state(false);
+  let audioDevices = $state<Array<{ index: number; name: string }>>([]);
+  let selectedAudioDeviceIndex = $state<number | null>(null);
 
   function getMimeType(filename: string): string {
     const ext = filename.split(".").pop()?.toLowerCase();
@@ -231,6 +236,26 @@
     event.preventDefault();
   }
 
+  // Load audio devices on mount
+  async function loadAudioDevices() {
+    try {
+      const result = await invoke<{ devices: Array<{ index: number; name: string }> }>('list_audio_devices');
+      audioDevices = result.devices;
+      // Auto-select first device if available
+      if (result.devices.length > 0 && selectedAudioDeviceIndex === null) {
+        selectedAudioDeviceIndex = result.devices[0].index;
+      }
+    } catch (error) {
+      console.error("Failed to load audio devices:", error);
+      audioDevices = [];
+    }
+  }
+
+  // Load audio devices when component mounts
+  $effect(() => {
+    loadAudioDevices();
+  });
+
   async function handleRecordStart() {
     try {
       // Clear selected clip so preview shows recording
@@ -352,6 +377,11 @@
         }
       }
 
+      // Determine audio device index to use (if audio is enabled)
+      const audioDeviceIndex = audioEnabled && selectedAudioDeviceIndex !== null 
+        ? selectedAudioDeviceIndex 
+        : null;
+
       // Start backend recording based on mode
       let result: { process_id: number; output_path: string };
       
@@ -363,6 +393,7 @@
             webcamDeviceIndex: null,
             pipPosition: 'bottom-right',  // Can be made configurable
             pipSize: null,
+            audioDeviceIndex: audioDeviceIndex,
           }
         );
       } else {
@@ -370,8 +401,8 @@
         result = await invoke<{ process_id: number; output_path: string }>(
           command,
           recordingMode === 'webcam' 
-            ? { outputPath: null, deviceIndex: null }
-            : { outputPath: null }
+            ? { outputPath: null, deviceIndex: null, audioDeviceIndex: audioDeviceIndex }
+            : { outputPath: null, audioDeviceIndex: audioDeviceIndex }
         );
       }
 
@@ -503,6 +534,34 @@
       <div class="panel-header">
         <h2 class="panel-title">Preview</h2>
         <div class="header-actions">
+          {#if !isRecording}
+            <div class="audio-controls">
+              <label class="audio-toggle">
+                <input 
+                  type="checkbox" 
+                  bind:checked={audioEnabled}
+                  disabled={audioDevices.length === 0}
+                />
+                <span>🎤 Audio</span>
+              </label>
+              {#if audioEnabled && audioDevices.length > 0}
+                <select 
+                  class="audio-device-select"
+                  bind:value={selectedAudioDeviceIndex}
+                  disabled={isRecording}
+                >
+                  {#each audioDevices as device}
+                    <option value={device.index}>
+                      {device.name}
+                    </option>
+                  {/each}
+                </select>
+              {/if}
+              {#if audioEnabled && audioDevices.length === 0}
+                <span class="audio-error">No audio devices found</span>
+              {/if}
+            </div>
+          {/if}
           <RecordButton 
             isRecording={isRecording}
             recordingTime={recordingTime}
@@ -600,6 +659,60 @@
     display: flex;
     gap: 0.5rem;
     align-items: center;
+  }
+
+  .audio-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.25rem 0.5rem;
+    background: var(--bg-tertiary, #1a1a1a);
+    border-radius: 4px;
+    border: 1px solid var(--border, #3a3a3a);
+  }
+
+  .audio-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85rem;
+    color: var(--text, #f6f6f6);
+  }
+
+  .audio-toggle input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent, #396cd8);
+  }
+
+  .audio-toggle:has(input:disabled) {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .audio-device-select {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid var(--border, #3a3a3a);
+    background: var(--bg-primary, #1a1a1a);
+    color: var(--text, #f6f6f6);
+    font-size: 0.8rem;
+    cursor: pointer;
+    min-width: 150px;
+  }
+
+  .audio-device-select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .audio-error {
+    font-size: 0.75rem;
+    color: var(--error, #dc2626);
+    opacity: 0.8;
   }
 
   .recording-placeholder {
